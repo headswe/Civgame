@@ -64,6 +64,8 @@ export class SceneView {
   private static readonly FIELD_RES = 128;
   private tileDecor = new Map<string, THREE.Mesh[]>();
   private tileTops = new Map<string, number>();
+  private slagGlow = new Map<string, THREE.Mesh>();
+  private slagGlowProto: THREE.ShaderMaterial | null = null;
   private animated: { obj: THREE.Object3D; base: number; phase: number; amp: number }[] = [];
   private tweens: { obj: THREE.Object3D; from: THREE.Vector3; to: THREE.Vector3; start: number; dur: number }[] = [];
   private bursts: { obj: THREE.Mesh; start: number }[] = [];
@@ -215,6 +217,7 @@ export class SceneView {
     this.terrainGroup.clear();
     this.tileMeshes.clear();
     this.tileDecor.clear();
+    this.slagGlow.clear();
     for (const t of game.tiles.values()) {
       const style = TERRAIN_STYLE[t.terrain];
       const { x, z } = toWorld(t);
@@ -238,6 +241,21 @@ export class SceneView {
       this.tileMeshes.set(`${t.q},${t.r}`, mesh);
       // The tile's "ground" is wherever its displaced center ended up.
       this.tileTops.set(`${t.q},${t.r}`, style.height + this.displacementAt(t, x, z, x, z));
+
+      if (t.terrain === Terrain.Slag) {
+        // A glow layer skinned to the same crust surface, drawing molten
+        // cracks additively just above it.
+        if (!this.slagGlowProto) this.slagGlowProto = makeSlagGlowMaterial(this.fogUniforms.uTime);
+        const glowGeo = geo.clone();
+        glowGeo.setDrawRange(geo.userData.capStart as number, geo.userData.capCount as number);
+        const glowMat = this.slagGlowProto.clone();
+        glowMat.uniforms.uTime = this.fogUniforms.uTime; // re-share the clock
+        const glow = new THREE.Mesh(glowGeo, glowMat);
+        glow.position.set(x, 0.008, z);
+        glow.renderOrder = 1;
+        this.terrainGroup.add(glow);
+        this.slagGlow.set(`${t.q},${t.r}`, glow);
+      }
 
       this.decorateTile(t, x, z, style.height);
     }
@@ -287,6 +305,16 @@ export class SceneView {
         (0.05 + 0.055 * Math.sin(u * 3.3 + 1.4 * Math.sin(v * 1.2)) + 0.028 * Math.sin(v * 4.6 + 0.9))
       );
     }
+    if (t.terrain === Terrain.Slag) {
+      // Buckled crust over a sagging channel: dips in the middle, with
+      // frozen plates shoved up at odd angles.
+      const d = Math.hypot(lx, lz);
+      const sag = -0.055 * (1 - d * d * 0.8);
+      const plates =
+        0.035 * Math.sin(wx * 3.7 + 1.9 * Math.sin(wz * 2.1)) +
+        0.022 * Math.sin(wz * 4.3 - 1.1 * Math.sin(wx * 2.7));
+      return Math.pow(rim, 0.6) * (sag + plates);
+    }
     return 0;
   }
 
@@ -297,7 +325,8 @@ export class SceneView {
    */
   private buildTileGeometry(t: Tile, game: Game, x: number, z: number): THREE.BufferGeometry {
     const style = TERRAIN_STYLE[t.terrain];
-    const displaced = t.terrain === Terrain.Highlands || t.terrain === Terrain.Ashdunes;
+    const displaced =
+      t.terrain === Terrain.Highlands || t.terrain === Terrain.Ashdunes || t.terrain === Terrain.Slag;
     const S = displaced ? 8 : 1;
     const H = style.height;
 
@@ -377,6 +406,8 @@ export class SceneView {
     geo.setIndex([...sideIndex, ...capIndex]);
     geo.addGroup(0, sideIndex.length, 0);
     geo.addGroup(sideIndex.length, capIndex.length, 1);
+    geo.userData.capStart = sideIndex.length;
+    geo.userData.capCount = capIndex.length;
     geo.computeVertexNormals();
     return geo;
   }
@@ -612,13 +643,38 @@ export class SceneView {
     if (t.terrain === Terrain.Ruins) {
       this.decorateRuin(t, x, z, top, rnd);
     } else if (t.terrain === Terrain.Slag) {
-      const glow = new THREE.Mesh(
-        new THREE.CylinderGeometry(TILE_R * 0.82, TILE_R * 0.82, 0.02, 6),
-        new THREE.MeshBasicMaterial({ color: 0xff5a1f }),
-      );
-      glow.position.set(x, top + 0.012, z);
-      this.addDecor(t, glow);
-      this.animated.push({ obj: glow, base: top + 0.012, phase: rnd() * 6, amp: 0 });
+      // Cooled crust plates shoved up where the flow buckled, plus a few
+      // embers drifting off the hot fissures.
+      const plates = 2 + Math.floor(rnd() * 3);
+      for (let i = 0; i < plates; i++) {
+        const w = 0.22 + rnd() * 0.26;
+        const plate = new THREE.Mesh(
+          new THREE.BoxGeometry(w, 0.035 + rnd() * 0.03, w * (0.5 + rnd() * 0.5)),
+          new THREE.MeshLambertMaterial({ color: [0x241713, 0x2e1d16, 0x1b110e][Math.floor(rnd() * 3)] }),
+        );
+        const a = rnd() * Math.PI * 2;
+        const rad = rnd() * 0.55;
+        const dx = Math.cos(a) * rad;
+        const dz = Math.sin(a) * rad;
+        const h = this.displacementAt(t, x + dx, z + dz, x, z);
+        plate.position.set(x + dx, top + h + 0.02, z + dz);
+        plate.rotation.set((rnd() - 0.5) * 0.55, rnd() * Math.PI, (rnd() - 0.5) * 0.55);
+        plate.castShadow = true;
+        this.addDecor(t, plate);
+      }
+      const embers = 1 + Math.floor(rnd() * 3);
+      for (let i = 0; i < embers; i++) {
+        const ember = new THREE.Mesh(
+          new THREE.SphereGeometry(0.022 + rnd() * 0.018, 5, 4),
+          new THREE.MeshBasicMaterial({ color: rnd() < 0.5 ? 0xff8a3c : 0xffc86a }),
+        );
+        const dx = (rnd() - 0.5) * 1.1;
+        const dz = (rnd() - 0.5) * 1.1;
+        const base = top + this.displacementAt(t, x + dx, z + dz, x, z) + 0.2 + rnd() * 0.25;
+        ember.position.set(x + dx, base, z + dz);
+        this.addDecor(t, ember);
+        this.animated.push({ obj: ember, base, phase: rnd() * 6, amp: 0.1 + rnd() * 0.09 });
+      }
     } else if (t.terrain === Terrain.Geovent) {
       const vent = new THREE.Mesh(
         new THREE.ConeGeometry(0.22, 0.5, 6),
@@ -681,6 +737,12 @@ export class SceneView {
       for (const d of this.tileDecor.get(k) ?? []) {
         d.visible = explored;
         (d.material as THREE.MeshLambertMaterial).color.copy(d.userData.baseColor as THREE.Color).multiplyScalar(factor);
+      }
+      const glow = this.slagGlow.get(k);
+      if (glow) {
+        // Molten light still shows through fog, just banked down.
+        glow.visible = explored;
+        (glow.material as THREE.ShaderMaterial).uniforms.uDim.value = seen ? 1 : 0.5;
       }
     }
     this.updateFogField(game);
@@ -1290,6 +1352,62 @@ export class SceneView {
 
     this.renderer.render(this.scene, this.camera);
   }
+}
+
+/**
+ * Molten cracks in cooled slag crust. Ridged noise carves a fracture network
+ * in world space (so it runs continuously across adjacent slag tiles); the
+ * heat pulses slowly and glows hotter deep inside the fissures.
+ */
+function makeSlagGlowMaterial(uTime: { value: number }): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime, uDim: { value: 1 } },
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */ `
+      varying vec3 vWorld;
+      void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorld = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uDim;
+      varying vec3 vWorld;
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+      float noise(vec2 p) {
+        vec2 i = floor(p), f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+                   mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+      }
+      float fbm(vec2 p) {
+        float v = 0.0, a = 0.5;
+        for (int i = 0; i < 4; i++) { v += a * noise(p); p *= 2.07; a *= 0.5; }
+        return v;
+      }
+      void main() {
+        vec2 p = vWorld.xz * 1.35;
+        // Ridged noise -> a network of thin fissures.
+        float n = fbm(p + 0.35 * fbm(p * 0.7));
+        float ridge = 1.0 - abs(n * 2.0 - 1.0);
+        float crack = smoothstep(0.86, 0.998, ridge);
+        // Narrow halo of heat-stressed rock along each fissure.
+        float halo = smoothstep(0.68, 0.97, ridge) * 0.16;
+        // Slow convective pulse, plus a faster flicker in the hottest cores.
+        float pulse = 0.72 + 0.28 * sin(uTime * 0.9 + n * 6.2);
+        float flicker = 0.9 + 0.1 * sin(uTime * 5.1 + vWorld.x * 3.0 + vWorld.z * 2.0);
+        float heat = (crack * flicker + halo) * pulse;
+        vec3 cool = vec3(0.55, 0.09, 0.02);
+        vec3 hot = vec3(1.0, 0.78, 0.32);
+        vec3 col = mix(cool, hot, smoothstep(0.25, 1.1, crack * flicker));
+        gl_FragColor = vec4(col * heat * 1.5, clamp(heat, 0.0, 1.0) * uDim);
+      }
+    `,
+  });
 }
 
 /**
