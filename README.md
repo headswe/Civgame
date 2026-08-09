@@ -47,6 +47,10 @@ Then open the printed URL (usually http://localhost:5173).
 *All persons depicted are parodies; any resemblance to billionaires living or
 cryopreserved is entirely the point.*
 
+Each techno-king's citadel is themed after their empire and physically grows
+with every era — from launch pads and warehouse-cathedrals to floating X
+emblems, all-watching orbs, and haloed obelisks.
+
 ## Controls
 
 - **Left-click** — select / move / attack

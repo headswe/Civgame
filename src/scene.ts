@@ -376,7 +376,7 @@ export class SceneView {
       // Buildings persist on explored ground as dim silhouettes; unexplored stays secret.
       if (!game.isExplored(b.q, b.r)) continue;
       const seen = game.isVisible(b.q, b.r);
-      const g = this.buildingMesh(b);
+      const g = this.buildingMesh(b, game.tierOf(b.faction));
       if (!seen) dimGroup(g, EXPLORED_DIM);
       this.dynamicGroup.add(g);
     }
@@ -464,7 +464,197 @@ export class SceneView {
     return this.tileTops.get(`${q},${r}`) ?? 0.3;
   }
 
-  private buildingMesh(b: Building): THREE.Group {
+  /**
+   * Faction citadels: each techno-king's seat is themed after their
+   * real-world(ish) empire, and gains a new architectural flourish with
+   * every era (tier 0-4). Stages are cumulative.
+   */
+  private citadelMesh(g: THREE.Group, faction: number, tier: number) {
+    const fc = FACTIONS[faction].color;
+    const accent = new THREE.MeshLambertMaterial({ color: fc });
+    const dark = new THREE.MeshLambertMaterial({ color: 0x3c3630 });
+    const metal = new THREE.MeshLambertMaterial({ color: 0x8a9098 });
+    const glow = (color: number) => new THREE.MeshBasicMaterial({ color });
+
+    const add = (mesh: THREE.Mesh, x: number, y: number, z: number): THREE.Mesh => {
+      mesh.position.set(x, y, z);
+      mesh.castShadow = true;
+      g.add(mesh);
+      return mesh;
+    };
+    const float = (obj: THREE.Object3D, baseY: number, amp: number) => {
+      this.animated.push({ obj, base: baseY, phase: faction * 2.1, amp });
+    };
+
+    switch (faction) {
+      // ---- Dominion of X: launch pad, rockets, and eventually a giant X ----
+      case 0: {
+        add(new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.8, 0.22, 6), dark), 0, 0.11, 0);
+        // Angular bunker, aggressively cybertruck.
+        const bunker = add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.34, 0.42, 4), metal), -0.32, 0.42, -0.2);
+        bunker.rotation.y = 0.5;
+        add(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.06, 0.3), accent), -0.32, 0.24, -0.2);
+        if (tier >= 1) {
+          const h = tier >= 2 ? 1.25 : 0.7;
+          add(new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, h, 10), metal), 0.18, 0.22 + h / 2, 0.12);
+          add(new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.3, 10), accent), 0.18, 0.22 + h + 0.15, 0.12);
+        }
+        if (tier >= 2) {
+          // Launch tower with fins on the rocket.
+          add(new THREE.Mesh(new THREE.BoxGeometry(0.09, 1.5, 0.09), dark), 0.52, 0.95, 0.12);
+          for (let i = 0; i < 3; i++) {
+            const fin = add(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.22, 0.03), accent), 0.18, 0.4, 0.12);
+            fin.rotation.y = (i / 3) * Math.PI * 2;
+            fin.translateX(0.14);
+          }
+        }
+        if (tier >= 3) {
+          // Chopstick catch-arms and an engine glow ring.
+          add(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.05, 0.06), metal), 0.36, 1.35, 0.06);
+          add(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.05, 0.06), metal), 0.36, 1.35, 0.2);
+          const ring = add(new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.035, 8, 16), glow(0xff7a2f)), 0.18, 0.28, 0.12);
+          ring.rotation.x = Math.PI / 2;
+        }
+        if (tier >= 4) {
+          // The letter fetish, fully realized: a giant floating X.
+          const xg = new THREE.Group();
+          const bar1 = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.12, 0.08), glow(0xff5540));
+          bar1.rotation.z = Math.PI / 4;
+          const bar2 = bar1.clone();
+          bar2.rotation.z = -Math.PI / 4;
+          xg.add(bar1, bar2);
+          xg.position.set(0.18, 2.25, 0.12);
+          g.add(xg);
+          float(xg, 2.25, 0.06);
+        }
+        break;
+      }
+
+      // ---- Zuckerborg Collective: glass campus, servers, the orb ----
+      case 1: {
+        add(new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.24, 0.8), new THREE.MeshLambertMaterial({ color: 0x5a7a9a })), 0, 0.12, 0);
+        add(new THREE.Mesh(new THREE.BoxGeometry(1.14, 0.05, 0.84), accent), 0, 0.27, 0);
+        if (tier >= 1) {
+          const tower = add(new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.9, 0.42), dark), -0.2, 0.72, -0.1);
+          void tower;
+          for (let i = 0; i < 3; i++) {
+            add(new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.04, 0.44), glow(0x4fa8ff)), -0.2, 0.5 + i * 0.28, -0.1);
+          }
+        }
+        if (tier >= 2) {
+          // The infinity emblem, in chrome.
+          const inf = new THREE.Group();
+          const l1 = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.045, 8, 18), metal);
+          const l2 = l1.clone();
+          l1.position.x = -0.12;
+          l2.position.x = 0.12;
+          l1.rotation.y = 0.5;
+          l2.rotation.y = -0.5;
+          inf.add(l1, l2);
+          inf.position.set(-0.2, 1.45, -0.1);
+          g.add(inf);
+        }
+        if (tier >= 3) {
+          // A monumental VR visor on the campus roof.
+          add(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.22, 0.3), new THREE.MeshLambertMaterial({ color: 0xd8d8dc })), 0.32, 0.42, 0.18);
+          add(new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.14, 0.06), glow(0x1a2a3a)), 0.32, 0.42, 0.34);
+        }
+        if (tier >= 4) {
+          // The orb sees your engagement metrics.
+          const orb = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 12), glow(0x4fa8ff));
+          orb.position.set(-0.2, 2.0, -0.1);
+          g.add(orb);
+          float(orb, 2.0, 0.08);
+          const ring = add(new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.02, 6, 20), accent), -0.2, 2.0, -0.1);
+          ring.rotation.x = Math.PI / 2.4;
+        }
+        break;
+      }
+
+      // ---- Prime Caliphate: the warehouse-cathedral ----
+      case 2: {
+        add(new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.4, 0.75), new THREE.MeshLambertMaterial({ color: 0x9a8f80 })), 0, 0.2, 0);
+        add(new THREE.Mesh(new THREE.BoxGeometry(1.19, 0.05, 0.79), dark), 0, 0.42, 0);
+        if (tier >= 1) {
+          add(new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.32, 0.6), new THREE.MeshLambertMaterial({ color: 0x8a7f70 })), -0.05, 0.6, 0);
+          // The smile. It is not optional.
+          const smile = add(new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.045, 8, 20, Math.PI * 0.75), glow(0xffb13c)), 0, 0.35, 0.39);
+          smile.rotation.z = Math.PI + 0.4;
+        }
+        if (tier >= 2) {
+          for (let i = 0; i < 3; i++) {
+            add(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.14, 0.14), new THREE.MeshLambertMaterial({ color: [0xb06a3a, 0x707a88, 0x8a5a2a][i] })), 0.32 - i * 0.24, 0.83, 0.12);
+          }
+          add(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.7, 0.16), dark), 0.44, 1.1, -0.2);
+          add(new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.12, 0.22), accent), 0.44, 1.5, -0.2);
+        }
+        if (tier >= 3) {
+          // A rocket of remarkably specific proportions.
+          add(new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.65, 12), new THREE.MeshLambertMaterial({ color: 0xe8e4dc })), -0.4, 1.1, -0.15);
+          add(new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 8), new THREE.MeshLambertMaterial({ color: 0xd8d4cc })), -0.4, 1.45, -0.15);
+        }
+        if (tier >= 4) {
+          // Delivery drones, circling forever.
+          for (let i = 0; i < 3; i++) {
+            const a = (i / 3) * Math.PI * 2;
+            const drone = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.05, 0.1), accent);
+            const rotor = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.015, 10), dark);
+            rotor.position.y = 0.05;
+            drone.add(body, rotor);
+            drone.position.set(Math.cos(a) * 0.55, 1.85, Math.sin(a) * 0.55);
+            g.add(drone);
+            float(drone, 1.85, 0.07 + i * 0.02);
+          }
+        }
+        break;
+      }
+
+      // ---- ClosedAI Papacy: the temple of the weights ----
+      default: {
+        const ivory = new THREE.MeshLambertMaterial({ color: 0xe3ddd0 });
+        add(new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.72, 0.18, 6), ivory), 0, 0.09, 0);
+        add(new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.58, 0.16, 6), ivory), 0, 0.26, 0);
+        if (tier >= 1) {
+          add(new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.2, 1.05, 4), ivory), 0, 0.86, 0);
+        }
+        if (tier >= 2) {
+          // The hexagonal halo. Vaguely open, legally closed.
+          const halo = add(new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.045, 8, 6), accent), 0, 1.75, 0);
+          halo.rotation.x = Math.PI / 2;
+          float(halo, 1.75, 0.05);
+        }
+        if (tier >= 3) {
+          const eye = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 12), new THREE.MeshLambertMaterial({ color: 0xf5f2ea }));
+          eye.position.set(0, 1.75, 0);
+          g.add(eye);
+          const iris = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), glow(0x45e8c8));
+          iris.position.set(0, 1.75, 0.1);
+          g.add(iris);
+          float(eye, 1.75, 0.05);
+          float(iris, 1.75, 0.05);
+        }
+        if (tier >= 4) {
+          const halo2 = add(new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.025, 8, 6), glow(0x45e8c8)), 0, 2.1, 0);
+          halo2.rotation.x = Math.PI / 2.6;
+          const beam = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.05, 0.09, 1.6, 8),
+            new THREE.MeshBasicMaterial({ color: 0xcafef0, transparent: true, opacity: 0.35, depthWrite: false }),
+          );
+          beam.position.set(0, 2.6, 0);
+          g.add(beam);
+        }
+        break;
+      }
+    }
+
+    // Every court needs a beacon in its house color.
+    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), glow(fc));
+    beacon.position.set(0, 0.55 + tier * 0.12, 0.42);
+    g.add(beacon);
+  }
+
+  private buildingMesh(b: Building, tier = 0): THREE.Group {
     const g = new THREE.Group();
     const fc = FACTIONS[b.faction].color;
     const accent = new THREE.MeshLambertMaterial({ color: fc });
@@ -479,16 +669,7 @@ export class SceneView {
 
     switch (b.kind) {
       case "citadel": {
-        add(new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.82, 0.3, 6), dark), 0.15);
-        add(new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.48, 0.9, 6), metal), 0.75);
-        add(new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.16, 6), accent), 1.3);
-        const beacon = new THREE.Mesh(
-          new THREE.SphereGeometry(0.1, 8, 8),
-          new THREE.MeshBasicMaterial({ color: fc }),
-        );
-        add(beacon, 1.62);
-        const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.5), metal);
-        add(spire, 1.5);
+        this.citadelMesh(g, b.faction, tier);
         break;
       }
       case "solar": {
