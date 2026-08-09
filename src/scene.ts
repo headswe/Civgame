@@ -179,8 +179,12 @@ export class SceneView {
     for (const t of game.tiles.values()) {
       const style = TERRAIN_STYLE[t.terrain];
       const geo = new THREE.CylinderGeometry(TILE_R, TILE_R, style.height, 6);
-      const mat = new THREE.MeshLambertMaterial({ color: style.color });
-      const mesh = new THREE.Mesh(geo, mat);
+      // Material array: [side, top cap, bottom]. The cap gets a ground
+      // texture when one exists; the side stays a darker cliff color.
+      const sideColor = new THREE.Color(style.color).multiplyScalar(0.62).getHex();
+      const side = new THREE.MeshLambertMaterial({ color: sideColor });
+      const top = new THREE.MeshLambertMaterial({ color: style.color });
+      const mesh = new THREE.Mesh(geo, [side, top, side]);
       const { x, z } = toWorld(t);
       // Default cylinder orientation puts a vertex at +z and flats toward all
       // six neighbor directions of this layout — exact tessellation, no extra
@@ -189,7 +193,9 @@ export class SceneView {
       mesh.receiveShadow = true;
       mesh.castShadow = t.terrain === Terrain.Highlands;
       mesh.userData.tile = { q: t.q, r: t.r };
-      mesh.userData.baseColor = style.color;
+      mesh.userData.topBase = style.color;
+      mesh.userData.sideBase = sideColor;
+      mesh.userData.terrain = t.terrain;
       this.terrainGroup.add(mesh);
       this.tileMeshes.set(`${t.q},${t.r}`, mesh);
       this.tileTops.set(`${t.q},${t.r}`, style.height);
@@ -198,7 +204,37 @@ export class SceneView {
 
     }
 
+    this.loadGroundTextures();
     this.buildClouds();
+  }
+
+  /**
+   * Ground textures are optional: if public/textures/ground_<terrain>.png
+   * exists (see scripts/generate-textures.mjs), it is draped over the tile
+   * caps of that terrain; otherwise the flat palette color stays.
+   */
+  private loadGroundTextures() {
+    const loader = new THREE.TextureLoader();
+    for (const terrain of Object.values(Terrain)) {
+      loader.load(
+        `textures/ground_${terrain}.png`,
+        (tex) => {
+          tex.colorSpace = THREE.SRGBColorSpace;
+          for (const mesh of this.tileMeshes.values()) {
+            if (mesh.userData.terrain !== terrain) continue;
+            const mats = mesh.material as THREE.MeshLambertMaterial[];
+            mats[1].map = tex;
+            mats[1].needsUpdate = true;
+            // The texture carries the ground color now; tint from near-white
+            // so fog dimming still works on top of it.
+            mesh.userData.topBase = 0xffffff;
+          }
+          if (this.lastGame) this.sync(this.lastGame);
+        },
+        undefined,
+        () => {}, // missing texture: keep the palette color, no console noise
+      );
+    }
   }
 
   /** Two drifting cloud planes floating above the map, density driven by the fog field. */
@@ -302,8 +338,11 @@ export class SceneView {
 
   // ------------------------------------------------------------------ dynamic
 
+  private lastGame: Game | null = null;
+
   /** Rebuild buildings + units from state. Cheap at this scale, always correct. */
   sync(game: Game) {
+    this.lastGame = game;
     game.recomputeVision();
     this.dynamicGroup.clear();
     this.animated = this.animated.filter((a) => a.obj.parent === this.terrainGroup || a.obj.parent === this.scene);
@@ -315,12 +354,17 @@ export class SceneView {
       const mesh = this.tileMeshes.get(k);
       if (!mesh) continue;
       // Looted ruins go dim permanently, on top of fog.
-      if (t.terrain === Terrain.Ruins) mesh.userData.baseColor = t.looted ? 0x3f434c : 0x5e6470;
+      if (t.terrain === Terrain.Ruins) {
+        const textured = !!(mesh.material as THREE.MeshLambertMaterial[])[1].map;
+        mesh.userData.topBase = t.looted ? (textured ? 0x6a6a6a : 0x3f434c) : (textured ? 0xffffff : 0x5e6470);
+      }
 
       const explored = game.isExplored(t.q, t.r);
       const seen = game.isVisible(t.q, t.r);
       const factor = seen ? 1 : explored ? EXPLORED_DIM : UNEXPLORED_DIM;
-      (mesh.material as THREE.MeshLambertMaterial).color.set(mesh.userData.baseColor as number).multiplyScalar(factor);
+      const mats = mesh.material as THREE.MeshLambertMaterial[];
+      mats[1].color.set(mesh.userData.topBase as number).multiplyScalar(factor);
+      mats[0].color.set(mesh.userData.sideBase as number).multiplyScalar(factor);
       for (const d of this.tileDecor.get(k) ?? []) {
         d.visible = explored;
         (d.material as THREE.MeshLambertMaterial).color.set(d.userData.baseColor as number).multiplyScalar(factor);

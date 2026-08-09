@@ -56,4 +56,19 @@ cryopreserved is entirely the point.*
 
 ## Stack
 
-Vite + TypeScript + Three.js. Every mesh is procedural — no art assets.
+Vite + TypeScript + Three.js. Every mesh is procedural — no art assets required.
+
+### Optional: AI-generated ground textures
+
+Tile tops can be draped with generated ground textures. Generate them with an
+Azure OpenAI gpt-image deployment (the key is read from the environment and
+must never be committed):
+
+```sh
+IMAGE_API_KEY=<your key> node scripts/generate-textures.mjs          # all terrains
+IMAGE_API_KEY=<your key> node scripts/generate-textures.mjs wastes   # just one
+```
+
+Textures land in `public/textures/ground_<terrain>.png`. Commit them and the
+game picks them up automatically; missing textures fall back to the flat
+palette colors.
