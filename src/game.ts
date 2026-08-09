@@ -416,7 +416,8 @@ export class Game {
 
       const newTier = this.tierOf(f);
       if (newTier > prevTier) {
-        this.log(`${fs.def.name} enters the ${TIERS[newTier].name}. ${TIERS[newTier].blurb}`, "quote");
+        const tn = TIERS[newTier].name;
+        this.log(`${fs.def.name} enters ${tn.startsWith("The ") ? tn : `the ${tn}`}. ${TIERS[newTier].blurb}`, "quote");
         if (fs.isPlayer) this.log(pick(ADVISOR.newTier), "quote");
       }
       if (newTier >= SINGULARITY_TIER && !this.result) {
@@ -426,9 +427,18 @@ export class Game {
   }
 
   checkConquest() {
+    if (this.result) return;
     const alive = this.factions.map((f, i) => (f.alive ? i : -1)).filter((i) => i >= 0);
-    if (alive.length === 1 && !this.result) {
+    if (alive.length === 1) {
       this.result = { winner: alive[0], type: "conquest" };
+      return;
+    }
+    // The player's fall ends the game — no spectating the robot slugfest.
+    if (!this.factions[this.playerFaction].alive && alive.length > 0) {
+      const winner = alive.reduce((a, b) =>
+        this.factions[b].compute > this.factions[a].compute ? b : a,
+      );
+      this.result = { winner, type: "conquest" };
     }
   }
 }
