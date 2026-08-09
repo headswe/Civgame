@@ -245,8 +245,8 @@ export class SceneView {
       mesh.position.set(cx, height, cz);
       this.cloudGroup.add(mesh);
     };
-    layer(1.7, 0.34, 1.0, 1.0); // main deck
-    layer(2.35, 0.55, 1.7, 0.45); // high wisps, faster drift
+    layer(1.7, 0.34, 2.6, 1.0); // main deck
+    layer(2.35, 0.55, 4.2, 0.45); // high wisps, faster drift
   }
 
   private addDecor(t: Tile, mesh: THREE.Mesh) {
@@ -387,11 +387,12 @@ export class SceneView {
 
     const density = (q: number, r: number): number => {
       const k = `${q},${r}`;
-      if (!game.tiles.has(k)) return 0.96; // beyond the map: solid cloud
+      if (!game.tiles.has(k)) return 0.95; // beyond the map: solid cloud
       if (game.visible.has(k)) return 0;
-      if (game.explored.has(k)) return 0.26; // remembered ground: light haze
-      const dd = depth.get(k) ?? 4;
-      return Math.min(0.5 + dd * 0.16, 0.96); // 1→0.66, 2→0.82, 3+→0.96
+      if (game.explored.has(k)) return 0.22; // remembered ground: light haze
+      const dd = depth.get(k) ?? 5;
+      // Long falloff: thickens over ~5 tiles from the frontier.
+      return Math.min(0.34 + dd * 0.13, 0.95); // 1→0.47, 2→0.60, 3→0.73, 4→0.86, 5+→0.95
     };
 
     const res = SceneView.FIELD_RES;
@@ -772,13 +773,18 @@ function makeCloudMaterial(
 
         float t = uTime * uSpeed;
         vec2 p = vWorld.xz * uScale;
-        float n1 = fbm(p + t * vec2(0.06, 0.022));
-        float n2 = fbm(p * 1.9 - t * vec2(0.03, 0.055) + 17.0);
+        // Domain warp: the noise field itself is pushed around by slower
+        // noise, which is what makes clouds billow instead of just scroll.
+        vec2 warp = vec2(fbm(p * 0.6 + t * vec2(0.05, 0.03)),
+                         fbm(p * 0.6 - t * vec2(0.04, 0.06) + 31.0));
+        p += (warp - 0.5) * 1.7;
+        float n1 = fbm(p + t * vec2(0.13, 0.05));
+        float n2 = fbm(p * 1.9 - t * vec2(0.07, 0.12) + 17.0);
         float m = n1 * 0.6 + n2 * 0.4;
 
-        // Noise erodes the fog where it is thin (ragged translucent edges) but
-        // barely dents it where it is deep (solid cover).
-        float wisp = mix(0.25 + 0.95 * m, 0.9 + 0.2 * m, smoothstep(0.55, 0.9, base));
+        // Noise erodes the fog where it is thin (ragged translucent edges) and
+        // still rolls visibly through the deep cover.
+        float wisp = mix(0.15 + 1.25 * m, 0.62 + 0.62 * m, smoothstep(0.5, 0.9, base));
         float alpha = clamp(base * wisp, 0.0, 0.97) * uWeight;
 
         // Dissolve before the cloud plane's own rectangular border shows.
@@ -786,11 +792,12 @@ function makeCloudMaterial(
                        * smoothstep(0.0, 0.12, uv.y) * smoothstep(1.0, 0.88, uv.y);
         alpha *= edgeFade;
 
-        // Bright mist at the thin edges, darkening as the deck thickens.
-        vec3 edge = vec3(0.52, 0.54, 0.62);
-        vec3 deep = vec3(0.075, 0.08, 0.115);
-        vec3 col = mix(edge, deep, smoothstep(0.25, 0.9, base));
-        col *= 0.82 + 0.35 * m;
+        // Bright mist at the thin edges, darkening as the deck thickens, with
+        // strong per-billow shading so the cloud structure reads everywhere.
+        vec3 edge = vec3(0.56, 0.58, 0.66);
+        vec3 deep = vec3(0.10, 0.105, 0.15);
+        vec3 col = mix(edge, deep, smoothstep(0.2, 0.9, base));
+        col *= 0.65 + 0.75 * m;
 
         gl_FragColor = vec4(col, alpha);
       }
