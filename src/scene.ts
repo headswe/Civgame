@@ -26,14 +26,13 @@ export class SceneView {
   private terrainGroup = new THREE.Group();
   private dynamicGroup = new THREE.Group();
   private highlightGroup = new THREE.Group();
-  private shroudGroup = new THREE.Group();
-  private mistGroup = new THREE.Group();
+  private cloudGroup = new THREE.Group();
   private tileMeshes = new Map<string, THREE.Mesh>();
-  private shroudMeshes = new Map<string, THREE.Mesh>();
-  private mistMeshes = new Map<string, THREE.Mesh>();
   private fogUniforms = { uTime: { value: 0 } };
-  private shroudMat: THREE.ShaderMaterial;
-  private mistMat: THREE.ShaderMaterial;
+  private fogField: THREE.DataTexture | null = null;
+  private fogFieldData: Uint8Array | null = null;
+  private worldBounds = { minX: 0, maxX: 1, minZ: 0, maxZ: 1 };
+  private static readonly FIELD_RES = 128;
   private tileDecor = new Map<string, THREE.Mesh[]>();
   private tileTops = new Map<string, number>();
   private animated: { obj: THREE.Object3D; base: number; phase: number; amp: number }[] = [];
@@ -83,10 +82,7 @@ export class SceneView {
     this.scene.add(new THREE.HemisphereLight(0x8899bb, 0x3a2a1a, 0.9));
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.25));
 
-    this.scene.add(this.terrainGroup, this.dynamicGroup, this.highlightGroup, this.shroudGroup, this.mistGroup);
-
-    this.shroudMat = makeFogMaterial(this.fogUniforms, 1.0);
-    this.mistMat = makeFogMaterial(this.fogUniforms, 0.55);
+    this.scene.add(this.terrainGroup, this.dynamicGroup, this.highlightGroup, this.cloudGroup);
 
     const ringGeo = new THREE.TorusGeometry(0.62, 0.05, 8, 24);
     ringGeo.rotateX(Math.PI / 2);
@@ -200,24 +196,57 @@ export class SceneView {
 
       this.decorateTile(t, x, z, style.height);
 
-      // Shroud: a slab of drifting mist covering unexplored tiles, so the fog
-      // reads as "unknown ground" and only past the map edge is true void.
-      // Uniform-ish height so terrain relief doesn't leak through.
-      const rnd = mulberry((t.q * 31 + t.r * 17 + 7) >>> 0);
-      const sh = 0.34 + rnd() * 0.1;
-      const shroud = new THREE.Mesh(new THREE.CylinderGeometry(TILE_R, TILE_R, sh, 6), this.shroudMat);
-      shroud.position.set(x, sh / 2, z);
-      shroud.userData.tile = { q: t.q, r: t.r };
-      this.shroudGroup.add(shroud);
-      this.shroudMeshes.set(`${t.q},${t.r}`, shroud);
-
-      // Mist: a thin translucent wisp layer laid over explored-but-fogged
-      // tiles, so remembered ground looks half-swallowed by the same fog.
-      const mist = new THREE.Mesh(new THREE.CylinderGeometry(TILE_R, TILE_R, 0.05, 6), this.mistMat);
-      mist.position.set(x, style.height + 0.09, z);
-      this.mistGroup.add(mist);
-      this.mistMeshes.set(`${t.q},${t.r}`, mist);
     }
+
+    this.buildClouds();
+  }
+
+  /** Two drifting cloud planes floating above the map, density driven by the fog field. */
+  private buildClouds() {
+    this.cloudGroup.clear();
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const m of this.tileMeshes.values()) {
+      minX = Math.min(minX, m.position.x);
+      maxX = Math.max(maxX, m.position.x);
+      minZ = Math.min(minZ, m.position.z);
+      maxZ = Math.max(maxZ, m.position.z);
+    }
+    const pad = 7;
+    this.worldBounds = { minX: minX - pad, maxX: maxX + pad, minZ: minZ - pad, maxZ: maxZ + pad };
+
+    const res = SceneView.FIELD_RES;
+    this.fogFieldData = new Uint8Array(res * res);
+    this.fogField = new THREE.DataTexture(this.fogFieldData, res, res, THREE.RedFormat, THREE.UnsignedByteType);
+    this.fogField.minFilter = THREE.LinearFilter;
+    this.fogField.magFilter = THREE.LinearFilter;
+    this.fogField.needsUpdate = true;
+
+    const w = this.worldBounds.maxX - this.worldBounds.minX;
+    const h = this.worldBounds.maxZ - this.worldBounds.minZ;
+    const cx = (this.worldBounds.minX + this.worldBounds.maxX) / 2;
+    const cz = (this.worldBounds.minZ + this.worldBounds.maxZ) / 2;
+    // Fixed iso camera forward, used to project cloud fragments down to the
+    // ground so the fog stays aligned with the tiles it hides.
+    const camDir = new THREE.Vector3(-1, -1.15, -1).normalize();
+
+    const layer = (height: number, scale: number, speed: number, weight: number) => {
+      const geo = new THREE.PlaneGeometry(w, h);
+      geo.rotateX(-Math.PI / 2);
+      const mat = makeCloudMaterial(this.fogUniforms.uTime, {
+        field: this.fogField!,
+        min: new THREE.Vector2(this.worldBounds.minX, this.worldBounds.minZ),
+        size: new THREE.Vector2(w, h),
+        camDir,
+        scale,
+        speed,
+        weight,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(cx, height, cz);
+      this.cloudGroup.add(mesh);
+    };
+    layer(1.7, 0.34, 1.0, 1.0); // main deck
+    layer(2.35, 0.55, 1.7, 0.45); // high wisps, faster drift
   }
 
   private addDecor(t: Tile, mesh: THREE.Mesh) {
@@ -279,7 +308,8 @@ export class SceneView {
     this.dynamicGroup.clear();
     this.animated = this.animated.filter((a) => a.obj.parent === this.terrainGroup || a.obj.parent === this.scene);
 
-    const EXPLORED_DIM = 0.38;
+    const EXPLORED_DIM = 0.42;
+    const UNEXPLORED_DIM = 0.1; // dark silhouette glimpsed through thin fog edges
     for (const t of game.tiles.values()) {
       const k = `${t.q},${t.r}`;
       const mesh = this.tileMeshes.get(k);
@@ -289,18 +319,14 @@ export class SceneView {
 
       const explored = game.isExplored(t.q, t.r);
       const seen = game.isVisible(t.q, t.r);
-      const factor = seen ? 1 : EXPLORED_DIM;
-      mesh.visible = explored;
-      const shroud = this.shroudMeshes.get(k);
-      if (shroud) shroud.visible = !explored;
-      const mist = this.mistMeshes.get(k);
-      if (mist) mist.visible = explored && !seen;
+      const factor = seen ? 1 : explored ? EXPLORED_DIM : UNEXPLORED_DIM;
       (mesh.material as THREE.MeshLambertMaterial).color.set(mesh.userData.baseColor as number).multiplyScalar(factor);
       for (const d of this.tileDecor.get(k) ?? []) {
         d.visible = explored;
         (d.material as THREE.MeshLambertMaterial).color.set(d.userData.baseColor as number).multiplyScalar(factor);
       }
     }
+    this.updateFogField(game);
 
     for (const b of game.buildings) {
       // Buildings persist on explored ground as dim silhouettes; unexplored stays secret.
@@ -315,6 +341,79 @@ export class SceneView {
       if (!game.isVisible(u.q, u.r)) continue;
       this.dynamicGroup.add(this.unitMesh(u));
     }
+  }
+
+  /**
+   * Rasterize fog density into the field texture: 0 where visible, light haze
+   * on remembered ground, then a ramp from translucent at the explored
+   * frontier to near-opaque deep in the unknown.
+   */
+  private updateFogField(game: Game) {
+    if (!this.fogField || !this.fogFieldData) return;
+
+    // Frontier distance for unexplored tiles (multi-source BFS from the
+    // explored border), giving the progressive thickening.
+    const depth = new Map<string, number>();
+    let frontier: { q: number; r: number }[] = [];
+    for (const t of game.tiles.values()) {
+      const k = `${t.q},${t.r}`;
+      if (game.explored.has(k)) continue;
+      const nearExplored = [
+        { q: t.q + 1, r: t.r }, { q: t.q + 1, r: t.r - 1 }, { q: t.q, r: t.r - 1 },
+        { q: t.q - 1, r: t.r }, { q: t.q - 1, r: t.r + 1 }, { q: t.q, r: t.r + 1 },
+      ].some((n) => game.explored.has(`${n.q},${n.r}`));
+      if (nearExplored) {
+        depth.set(k, 1);
+        frontier.push(t);
+      }
+    }
+    let d = 1;
+    while (frontier.length) {
+      const next: { q: number; r: number }[] = [];
+      for (const c of frontier) {
+        for (const n of [
+          { q: c.q + 1, r: c.r }, { q: c.q + 1, r: c.r - 1 }, { q: c.q, r: c.r - 1 },
+          { q: c.q - 1, r: c.r }, { q: c.q - 1, r: c.r + 1 }, { q: c.q, r: c.r + 1 },
+        ]) {
+          const k = `${n.q},${n.r}`;
+          if (!game.tiles.has(k) || game.explored.has(k) || depth.has(k)) continue;
+          depth.set(k, d + 1);
+          next.push(n);
+        }
+      }
+      frontier = next;
+      d++;
+    }
+
+    const density = (q: number, r: number): number => {
+      const k = `${q},${r}`;
+      if (!game.tiles.has(k)) return 0.96; // beyond the map: solid cloud
+      if (game.visible.has(k)) return 0;
+      if (game.explored.has(k)) return 0.26; // remembered ground: light haze
+      const dd = depth.get(k) ?? 4;
+      return Math.min(0.5 + dd * 0.16, 0.96); // 1→0.66, 2→0.82, 3+→0.96
+    };
+
+    const res = SceneView.FIELD_RES;
+    const { minX, maxX, minZ, maxZ } = this.worldBounds;
+    const sqrt3 = Math.sqrt(3);
+    for (let iy = 0; iy < res; iy++) {
+      const z = minZ + ((iy + 0.5) / res) * (maxZ - minZ);
+      for (let ix = 0; ix < res; ix++) {
+        const x = minX + ((ix + 0.5) / res) * (maxX - minX);
+        // World -> nearest hex (axial round).
+        const fq = (sqrt3 / 3) * x - z / 3;
+        const fr = (2 / 3) * z;
+        const fs = -fq - fr;
+        let q = Math.round(fq), r = Math.round(fr);
+        const s = Math.round(fs);
+        const dq = Math.abs(q - fq), dr = Math.abs(r - fr), ds = Math.abs(s - fs);
+        if (dq > dr && dq > ds) q = -r - s;
+        else if (dr > ds) r = -q - s;
+        this.fogFieldData[iy * res + ix] = Math.round(density(q, r) * 255);
+      }
+    }
+    this.fogField.needsUpdate = true;
   }
 
   private groundY(q: number, r: number): number {
@@ -556,7 +655,7 @@ export class SceneView {
     );
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const hits = this.raycaster.intersectObjects(
-      [...this.terrainGroup.children, ...this.dynamicGroup.children, ...this.shroudGroup.children],
+      [...this.terrainGroup.children, ...this.dynamicGroup.children],
       true,
     );
     for (const h of hits) {
@@ -603,14 +702,37 @@ export class SceneView {
 }
 
 /**
- * Animated fog: two layers of FBM value noise drifting in different
- * directions over world-space XZ, so the mist flows continuously across
- * tile boundaries. `opacity` 1 = opaque shroud, <1 = translucent wisps.
+ * A drifting cloud deck. Density comes from the fog field texture (0 = clear,
+ * 1 = solid) sampled at the point on the ground this fragment hides — the
+ * fragment is projected down along the fixed iso camera direction, so the
+ * elevated cloud stays aligned with the tiles beneath it. FBM noise shreds
+ * the edges and keeps the deck rolling.
  */
-function makeFogMaterial(uniforms: { uTime: { value: number } }, opacity: number): THREE.ShaderMaterial {
-  const mat = new THREE.ShaderMaterial({
-    uniforms: uniforms as unknown as Record<string, THREE.IUniform>,
-    defines: opacity < 1 ? { WISPY: 1 } : {},
+function makeCloudMaterial(
+  uTime: { value: number },
+  opts: {
+    field: THREE.DataTexture;
+    min: THREE.Vector2;
+    size: THREE.Vector2;
+    camDir: THREE.Vector3;
+    scale: number;
+    speed: number;
+    weight: number;
+  },
+): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uTime,
+      uField: { value: opts.field },
+      uMin: { value: opts.min },
+      uSize: { value: opts.size },
+      uCamDir: { value: opts.camDir },
+      uScale: { value: opts.scale },
+      uSpeed: { value: opts.speed },
+      uWeight: { value: opts.weight },
+    },
+    transparent: true,
+    depthWrite: false,
     vertexShader: /* glsl */ `
       varying vec3 vWorld;
       void main() {
@@ -621,6 +743,13 @@ function makeFogMaterial(uniforms: { uTime: { value: number } }, opacity: number
     `,
     fragmentShader: /* glsl */ `
       uniform float uTime;
+      uniform sampler2D uField;
+      uniform vec2 uMin;
+      uniform vec2 uSize;
+      uniform vec3 uCamDir;
+      uniform float uScale;
+      uniform float uSpeed;
+      uniform float uWeight;
       varying vec3 vWorld;
       float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
       float noise(vec2 p) {
@@ -635,24 +764,38 @@ function makeFogMaterial(uniforms: { uTime: { value: number } }, opacity: number
         return v;
       }
       void main() {
-        vec2 p = vWorld.xz * 0.32;
-        float n1 = fbm(p + uTime * vec2(0.055, 0.02));
-        float n2 = fbm(p * 1.8 - uTime * vec2(0.028, 0.05) + 17.0);
-        float m = n1 * 0.62 + n2 * 0.38;
-        vec3 deep = vec3(0.085, 0.09, 0.125);
-        vec3 mist = vec3(0.38, 0.40, 0.48);
-        vec3 col = mix(deep, mist, smoothstep(0.22, 0.88, m));
-        float alpha = OPACITY;
-        #ifdef WISPY
-          alpha *= 0.45 + 0.55 * smoothstep(0.3, 0.9, m);
-        #endif
+        // Project this cloud fragment down to the ground along the camera ray
+        // so density lines up with the tiles it is supposed to hide.
+        vec2 groundXZ = vWorld.xz + uCamDir.xz * (vWorld.y / -uCamDir.y);
+        vec2 uv = (groundXZ - uMin) / uSize;
+        float base = texture2D(uField, uv).r;
+
+        float t = uTime * uSpeed;
+        vec2 p = vWorld.xz * uScale;
+        float n1 = fbm(p + t * vec2(0.06, 0.022));
+        float n2 = fbm(p * 1.9 - t * vec2(0.03, 0.055) + 17.0);
+        float m = n1 * 0.6 + n2 * 0.4;
+
+        // Noise erodes the fog where it is thin (ragged translucent edges) but
+        // barely dents it where it is deep (solid cover).
+        float wisp = mix(0.25 + 0.95 * m, 0.9 + 0.2 * m, smoothstep(0.55, 0.9, base));
+        float alpha = clamp(base * wisp, 0.0, 0.97) * uWeight;
+
+        // Dissolve before the cloud plane's own rectangular border shows.
+        float edgeFade = smoothstep(0.0, 0.12, uv.x) * smoothstep(1.0, 0.88, uv.x)
+                       * smoothstep(0.0, 0.12, uv.y) * smoothstep(1.0, 0.88, uv.y);
+        alpha *= edgeFade;
+
+        // Bright mist at the thin edges, darkening as the deck thickens.
+        vec3 edge = vec3(0.52, 0.54, 0.62);
+        vec3 deep = vec3(0.075, 0.08, 0.115);
+        vec3 col = mix(edge, deep, smoothstep(0.25, 0.9, base));
+        col *= 0.82 + 0.35 * m;
+
         gl_FragColor = vec4(col, alpha);
       }
-    `.replace("OPACITY", opacity.toFixed(2)),
-    transparent: opacity < 1,
-    depthWrite: opacity >= 1,
+    `,
   });
-  return mat;
 }
 
 function dimGroup(g: THREE.Object3D, factor: number) {
