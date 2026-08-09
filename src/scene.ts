@@ -33,10 +33,22 @@ export class SceneView {
 
   private frustum = 14;
   private camTarget = new THREE.Vector3();
-  private clock = new THREE.Clock();
+  private startTime = performance.now();
 
   constructor(private canvas: HTMLCanvasElement) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    try {
+      this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    } catch {
+      // Privacy-hardened browsers (fingerprinting resistance) or disabled
+      // hardware acceleration can reject the first attempt; try the most
+      // conservative settings before giving up.
+      this.renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: false,
+        powerPreference: "default",
+        failIfMajorPerformanceCaveat: false,
+      });
+    }
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -535,7 +547,7 @@ export class SceneView {
   // -------------------------------------------------------------------- loop
 
   private frame() {
-    const t = this.clock.getElapsedTime();
+    const t = (performance.now() - this.startTime) / 1000;
     for (const a of this.animated) {
       if (a.amp > 0) a.obj.position.y = a.base + Math.sin(t * 2 + a.phase) * a.amp;
       const mat = (a.obj as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;

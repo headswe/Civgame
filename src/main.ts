@@ -36,13 +36,43 @@ function showFactionSelect() {
   });
 }
 
+function showWebGLError() {
+  overlay.innerHTML = `
+    <div class="menu">
+      <h1>NO SIGNAL</h1>
+      <div class="endstate">
+        Your browser refused to open a WebGL context, and the wasteland
+        cannot be rendered by vibes alone.
+      </div>
+      <div class="howto">
+        This usually means one of:<br>
+        · <b>Hardware acceleration is off</b> — enable it in your browser settings.<br>
+        · <b>Strict privacy / fingerprinting protection</b> (common in Zen, Librewolf,
+        or Firefox with <i>resistFingerprinting</i>) is blocking WebGL — allow it for this
+        site.<br>
+        · The GPU driver is on your browser's blocklist — try another browser
+        (Chrome and stock Firefox are known to work).
+      </div>
+      <button class="bigbtn" id="again">TRY AGAIN</button>
+    </div>`;
+  document.getElementById("again")!.onclick = () => showFactionSelect();
+}
+
 function startGame(faction: number) {
   overlay.innerHTML = "";
   document.getElementById("log")!.innerHTML = "";
 
   const game = new Game(faction);
   const canvas = document.getElementById("scene") as HTMLCanvasElement;
-  if (!view) view = new SceneView(canvas);
+  if (!view) {
+    try {
+      view = new SceneView(canvas);
+    } catch (err) {
+      console.error("WebGL unavailable:", err);
+      showWebGLError();
+      return;
+    }
+  }
   view.buildMap(game);
   view.sync(game);
 
