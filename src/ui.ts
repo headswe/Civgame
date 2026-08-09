@@ -225,7 +225,7 @@ export class GameUI {
     const water = this.game.waterIncome(p);
     const dry = f.water + water < 0;
     this.topbar.innerHTML = `
-      <span class="faction-chip" style="background:${f.def.cssColor}">${f.def.name}</span>
+      <span class="faction-chip" style="background:${f.def.cssColor}"><img src="portraits/${f.def.portrait}.png" alt="" onerror="this.style.display='none'">${f.def.name}</span>
       <span class="stat power">⚡ <b>${f.power}</b> <span class="${income < 0 ? "neg" : ""}">(${income >= 0 ? "+" : ""}${income}/t)</span></span>
       <span class="stat water" title="Server racks need water to stay cool. Run dry and your cores throttle and cook.">💧 <b>${f.water}</b> <span class="${dry ? "neg" : ""}">(${water >= 0 ? "+" : ""}${water}/t)</span></span>
       <span class="stat compute">▣ <b>${f.compute}</b> ${f.overheated ? '<span class="neg">OVERHEATED</span>' : `(+${this.game.computeIncome(p)}/t)`}</span>
@@ -252,12 +252,10 @@ export class GameUI {
       el.innerHTML = `<h3>WASTELAND COMMAND</h3>
         <div class="sub">${this.game.factions[p].def.leader} demands progress.</div>
         <div class="hint">
-          Left-click: select / move / attack.<br>
-          Right-drag or WASD: pan camera. Wheel: zoom.<br>
-          Select your Citadel to build and produce.<br>
-          Power ⚡ pays for everything. Water 💧 cools your AI cores.<br>
-          Compute ▣ advances your era. Vents can host a reactor <i>or</i> a condenser — choose.<br>
-          Win by razing every rival citadel — or by reaching ${TIERS[TIERS.length - 1].compute}▣ and ascending.
+          Select your <b>Citadel</b> to build and produce.<br>
+          ⚡ pays for everything · 💧 cools the cores · ▣ advances the era.<br>
+          Vents host a reactor <i>or</i> a condenser — choose.<br>
+          Win by razing every rival citadel, or reaching ${TIERS[TIERS.length - 1].compute}▣.
         </div>`;
       return;
     }

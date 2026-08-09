@@ -188,6 +188,8 @@ export const FACTIONS: FactionDef[] = [
     leader: "Baron Elom Tusk",
     color: 0xd94f3d,
     cssColor: "#d94f3d",
+    portrait: "dominion",
+    emblem: "✖",
     perk: "Hyperloop Logistics",
     perkDesc: "All units get <b>+1 movement</b>. The tunnels finally connect somewhere.",
     quotes: [
@@ -203,6 +205,8 @@ export const FACTIONS: FactionDef[] = [
     leader: "Overlord Mark Zuckerborg",
     color: 0x3d7bd9,
     cssColor: "#3d7bd9",
+    portrait: "collective",
+    emblem: "∞",
     perk: "Engagement Farming",
     perkDesc: "Server racks yield <b>+1▣/turn</b>. Your data, his compute.",
     quotes: [
@@ -218,6 +222,8 @@ export const FACTIONS: FactionDef[] = [
     leader: "God-CEO Beff Jezos",
     color: 0xe6a13c,
     cssColor: "#e6a13c",
+    portrait: "caliphate",
+    emblem: "➤",
     perk: "Two-Day Feudalism",
     perkDesc: "Buildings cost <b>20% less</b> power. Logistics is destiny.",
     quotes: [
@@ -233,6 +239,8 @@ export const FACTIONS: FactionDef[] = [
     leader: "Prophet Sam Saltman",
     color: 0x45c9a5,
     cssColor: "#45c9a5",
+    portrait: "papacy",
+    emblem: "⬡",
     perk: "We Had It All Along",
     perkDesc: "Start with <b>+25▣ compute</b> already accumulated. It was trained before the Collapse.",
     quotes: [

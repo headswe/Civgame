@@ -82,6 +82,8 @@ export interface FactionDef {
   leader: string;
   color: number; // three.js hex color
   cssColor: string;
+  portrait: string; // public/portraits/<portrait>.png
+  emblem: string; // fallback glyph if the portrait is missing
   perk: string;
   perkDesc: string;
   quotes: string[];
