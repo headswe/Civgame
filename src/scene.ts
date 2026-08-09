@@ -351,33 +351,33 @@ export class SceneView {
   private updateFogField(game: Game) {
     if (!this.fogField || !this.fogFieldData) return;
 
-    // Frontier distance for unexplored tiles (multi-source BFS from the
-    // explored border), giving the progressive thickening.
+    // Frontier distance via multi-source BFS from the explored border. The
+    // BFS deliberately flows past the map boundary as well, so fog fades in
+    // just as gradually off-map — otherwise the edge of the world would slam
+    // to full density and bleed onto visible border tiles.
+    const hexNeighbors = (q: number, r: number) => [
+      { q: q + 1, r }, { q: q + 1, r: r - 1 }, { q, r: r - 1 },
+      { q: q - 1, r }, { q: q - 1, r: r + 1 }, { q, r: r + 1 },
+    ];
     const depth = new Map<string, number>();
     let frontier: { q: number; r: number }[] = [];
-    for (const t of game.tiles.values()) {
-      const k = `${t.q},${t.r}`;
-      if (game.explored.has(k)) continue;
-      const nearExplored = [
-        { q: t.q + 1, r: t.r }, { q: t.q + 1, r: t.r - 1 }, { q: t.q, r: t.r - 1 },
-        { q: t.q - 1, r: t.r }, { q: t.q - 1, r: t.r + 1 }, { q: t.q, r: t.r + 1 },
-      ].some((n) => game.explored.has(`${n.q},${n.r}`));
-      if (nearExplored) {
-        depth.set(k, 1);
-        frontier.push(t);
+    for (const k of game.explored) {
+      const [q, r] = k.split(",").map(Number);
+      for (const n of hexNeighbors(q, r)) {
+        const nk = `${n.q},${n.r}`;
+        if (game.explored.has(nk) || depth.has(nk)) continue;
+        depth.set(nk, 1);
+        frontier.push(n);
       }
     }
     let d = 1;
-    while (frontier.length) {
+    while (frontier.length && d < 6) {
       const next: { q: number; r: number }[] = [];
       for (const c of frontier) {
-        for (const n of [
-          { q: c.q + 1, r: c.r }, { q: c.q + 1, r: c.r - 1 }, { q: c.q, r: c.r - 1 },
-          { q: c.q - 1, r: c.r }, { q: c.q - 1, r: c.r + 1 }, { q: c.q, r: c.r + 1 },
-        ]) {
-          const k = `${n.q},${n.r}`;
-          if (!game.tiles.has(k) || game.explored.has(k) || depth.has(k)) continue;
-          depth.set(k, d + 1);
+        for (const n of hexNeighbors(c.q, c.r)) {
+          const nk = `${n.q},${n.r}`;
+          if (game.explored.has(nk) || depth.has(nk)) continue;
+          depth.set(nk, d + 1);
           next.push(n);
         }
       }
@@ -387,11 +387,10 @@ export class SceneView {
 
     const density = (q: number, r: number): number => {
       const k = `${q},${r}`;
-      if (!game.tiles.has(k)) return 0.95; // beyond the map: solid cloud
       if (game.visible.has(k)) return 0;
       if (game.explored.has(k)) return 0.22; // remembered ground: light haze
-      const dd = depth.get(k) ?? 5;
-      // Long falloff: thickens over ~5 tiles from the frontier.
+      const dd = depth.get(k) ?? 6;
+      // Long falloff: thickens over ~5 tiles from the frontier, on and off map.
       return Math.min(0.34 + dd * 0.13, 0.95); // 1→0.47, 2→0.60, 3→0.73, 4→0.86, 5+→0.95
     };
 
