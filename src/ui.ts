@@ -127,8 +127,16 @@ export class GameUI {
       return;
     }
     const t = this.game.tile(pos.q, pos.r);
-    if (!t || !this.game.isExplored(pos.q, pos.r)) {
+    if (!t) {
       this.tooltipEl.classList.add("hidden");
+      return;
+    }
+    if (!this.game.isExplored(pos.q, pos.r)) {
+      this.tooltipEl.innerHTML = `<div class="t-title">Terra Incognita</div>
+        <div class="t-dim">Unscouted wasteland — send a drone.</div>`;
+      this.tooltipEl.style.left = `${Math.min(e.clientX + 14, window.innerWidth - 260)}px`;
+      this.tooltipEl.style.top = `${e.clientY + 14}px`;
+      this.tooltipEl.classList.remove("hidden");
       return;
     }
     const seen = this.game.isVisible(pos.q, pos.r);

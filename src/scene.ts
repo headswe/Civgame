@@ -26,7 +26,9 @@ export class SceneView {
   private terrainGroup = new THREE.Group();
   private dynamicGroup = new THREE.Group();
   private highlightGroup = new THREE.Group();
+  private shroudGroup = new THREE.Group();
   private tileMeshes = new Map<string, THREE.Mesh>();
+  private shroudMeshes = new Map<string, THREE.Mesh>();
   private tileDecor = new Map<string, THREE.Mesh[]>();
   private tileTops = new Map<string, number>();
   private animated: { obj: THREE.Object3D; base: number; phase: number; amp: number }[] = [];
@@ -76,7 +78,7 @@ export class SceneView {
     this.scene.add(new THREE.HemisphereLight(0x8899bb, 0x3a2a1a, 0.9));
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.25));
 
-    this.scene.add(this.terrainGroup, this.dynamicGroup, this.highlightGroup);
+    this.scene.add(this.terrainGroup, this.dynamicGroup, this.highlightGroup, this.shroudGroup);
 
     const ringGeo = new THREE.TorusGeometry(0.62, 0.05, 8, 24);
     ringGeo.rotateX(Math.PI / 2);
@@ -189,6 +191,21 @@ export class SceneView {
       this.tileTops.set(`${t.q},${t.r}`, style.height);
 
       this.decorateTile(t, x, z, style.height);
+
+      // Shroud: a murky slab covering unexplored tiles, so the fog reads as
+      // "unknown ground" and only past the map edge is true void. Uniform-ish
+      // height so terrain relief doesn't leak through.
+      const rnd = mulberry((t.q * 31 + t.r * 17 + 7) >>> 0);
+      const sh = 0.3 + rnd() * 0.08;
+      const shroudColor = new THREE.Color(0x363642).multiplyScalar(0.9 + rnd() * 0.25);
+      const shroud = new THREE.Mesh(
+        new THREE.CylinderGeometry(TILE_R, TILE_R, sh, 6),
+        new THREE.MeshLambertMaterial({ color: shroudColor }),
+      );
+      shroud.position.set(x, sh / 2, z);
+      shroud.userData.tile = { q: t.q, r: t.r };
+      this.shroudGroup.add(shroud);
+      this.shroudMeshes.set(`${t.q},${t.r}`, shroud);
     }
   }
 
@@ -263,6 +280,8 @@ export class SceneView {
       const seen = game.isVisible(t.q, t.r);
       const factor = seen ? 1 : EXPLORED_DIM;
       mesh.visible = explored;
+      const shroud = this.shroudMeshes.get(k);
+      if (shroud) shroud.visible = !explored;
       (mesh.material as THREE.MeshLambertMaterial).color.set(mesh.userData.baseColor as number).multiplyScalar(factor);
       for (const d of this.tileDecor.get(k) ?? []) {
         d.visible = explored;
@@ -524,10 +543,11 @@ export class SceneView {
     );
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const hits = this.raycaster.intersectObjects(
-      [...this.terrainGroup.children, ...this.dynamicGroup.children],
+      [...this.terrainGroup.children, ...this.dynamicGroup.children, ...this.shroudGroup.children],
       true,
     );
     for (const h of hits) {
+      if (!h.object.visible) continue; // raycaster doesn't skip hidden meshes itself
       let o: THREE.Object3D | null = h.object;
       while (o) {
         if (o.userData.tile) return o.userData.tile;
