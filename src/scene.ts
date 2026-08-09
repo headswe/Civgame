@@ -27,8 +27,13 @@ export class SceneView {
   private dynamicGroup = new THREE.Group();
   private highlightGroup = new THREE.Group();
   private shroudGroup = new THREE.Group();
+  private mistGroup = new THREE.Group();
   private tileMeshes = new Map<string, THREE.Mesh>();
   private shroudMeshes = new Map<string, THREE.Mesh>();
+  private mistMeshes = new Map<string, THREE.Mesh>();
+  private fogUniforms = { uTime: { value: 0 } };
+  private shroudMat: THREE.ShaderMaterial;
+  private mistMat: THREE.ShaderMaterial;
   private tileDecor = new Map<string, THREE.Mesh[]>();
   private tileTops = new Map<string, number>();
   private animated: { obj: THREE.Object3D; base: number; phase: number; amp: number }[] = [];
@@ -78,7 +83,10 @@ export class SceneView {
     this.scene.add(new THREE.HemisphereLight(0x8899bb, 0x3a2a1a, 0.9));
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.25));
 
-    this.scene.add(this.terrainGroup, this.dynamicGroup, this.highlightGroup, this.shroudGroup);
+    this.scene.add(this.terrainGroup, this.dynamicGroup, this.highlightGroup, this.shroudGroup, this.mistGroup);
+
+    this.shroudMat = makeFogMaterial(this.fogUniforms, 1.0);
+    this.mistMat = makeFogMaterial(this.fogUniforms, 0.55);
 
     const ringGeo = new THREE.TorusGeometry(0.62, 0.05, 8, 24);
     ringGeo.rotateX(Math.PI / 2);
@@ -192,20 +200,23 @@ export class SceneView {
 
       this.decorateTile(t, x, z, style.height);
 
-      // Shroud: a murky slab covering unexplored tiles, so the fog reads as
-      // "unknown ground" and only past the map edge is true void. Uniform-ish
-      // height so terrain relief doesn't leak through.
+      // Shroud: a slab of drifting mist covering unexplored tiles, so the fog
+      // reads as "unknown ground" and only past the map edge is true void.
+      // Uniform-ish height so terrain relief doesn't leak through.
       const rnd = mulberry((t.q * 31 + t.r * 17 + 7) >>> 0);
-      const sh = 0.3 + rnd() * 0.08;
-      const shroudColor = new THREE.Color(0x363642).multiplyScalar(0.9 + rnd() * 0.25);
-      const shroud = new THREE.Mesh(
-        new THREE.CylinderGeometry(TILE_R, TILE_R, sh, 6),
-        new THREE.MeshLambertMaterial({ color: shroudColor }),
-      );
+      const sh = 0.34 + rnd() * 0.1;
+      const shroud = new THREE.Mesh(new THREE.CylinderGeometry(TILE_R, TILE_R, sh, 6), this.shroudMat);
       shroud.position.set(x, sh / 2, z);
       shroud.userData.tile = { q: t.q, r: t.r };
       this.shroudGroup.add(shroud);
       this.shroudMeshes.set(`${t.q},${t.r}`, shroud);
+
+      // Mist: a thin translucent wisp layer laid over explored-but-fogged
+      // tiles, so remembered ground looks half-swallowed by the same fog.
+      const mist = new THREE.Mesh(new THREE.CylinderGeometry(TILE_R, TILE_R, 0.05, 6), this.mistMat);
+      mist.position.set(x, style.height + 0.09, z);
+      this.mistGroup.add(mist);
+      this.mistMeshes.set(`${t.q},${t.r}`, mist);
     }
   }
 
@@ -282,6 +293,8 @@ export class SceneView {
       mesh.visible = explored;
       const shroud = this.shroudMeshes.get(k);
       if (shroud) shroud.visible = !explored;
+      const mist = this.mistMeshes.get(k);
+      if (mist) mist.visible = explored && !seen;
       (mesh.material as THREE.MeshLambertMaterial).color.set(mesh.userData.baseColor as number).multiplyScalar(factor);
       for (const d of this.tileDecor.get(k) ?? []) {
         d.visible = explored;
@@ -571,6 +584,7 @@ export class SceneView {
 
   private frame() {
     const t = (performance.now() - this.startTime) / 1000;
+    this.fogUniforms.uTime.value = t;
     for (const a of this.animated) {
       if (a.amp > 0) a.obj.position.y = a.base + Math.sin(t * 2 + a.phase) * a.amp;
       const mat = (a.obj as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;
@@ -586,6 +600,59 @@ export class SceneView {
     this.selectionRing.scale.set(s, 1, s);
     this.renderer.render(this.scene, this.camera);
   }
+}
+
+/**
+ * Animated fog: two layers of FBM value noise drifting in different
+ * directions over world-space XZ, so the mist flows continuously across
+ * tile boundaries. `opacity` 1 = opaque shroud, <1 = translucent wisps.
+ */
+function makeFogMaterial(uniforms: { uTime: { value: number } }, opacity: number): THREE.ShaderMaterial {
+  const mat = new THREE.ShaderMaterial({
+    uniforms: uniforms as unknown as Record<string, THREE.IUniform>,
+    defines: opacity < 1 ? { WISPY: 1 } : {},
+    vertexShader: /* glsl */ `
+      varying vec3 vWorld;
+      void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorld = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      varying vec3 vWorld;
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+      float noise(vec2 p) {
+        vec2 i = floor(p), f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+                   mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+      }
+      float fbm(vec2 p) {
+        float v = 0.0, a = 0.5;
+        for (int i = 0; i < 4; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; }
+        return v;
+      }
+      void main() {
+        vec2 p = vWorld.xz * 0.32;
+        float n1 = fbm(p + uTime * vec2(0.055, 0.02));
+        float n2 = fbm(p * 1.8 - uTime * vec2(0.028, 0.05) + 17.0);
+        float m = n1 * 0.62 + n2 * 0.38;
+        vec3 deep = vec3(0.085, 0.09, 0.125);
+        vec3 mist = vec3(0.38, 0.40, 0.48);
+        vec3 col = mix(deep, mist, smoothstep(0.22, 0.88, m));
+        float alpha = OPACITY;
+        #ifdef WISPY
+          alpha *= 0.45 + 0.55 * smoothstep(0.3, 0.9, m);
+        #endif
+        gl_FragColor = vec4(col, alpha);
+      }
+    `.replace("OPACITY", opacity.toFixed(2)),
+    transparent: opacity < 1,
+    depthWrite: opacity >= 1,
+  });
+  return mat;
 }
 
 function dimGroup(g: THREE.Object3D, factor: number) {
