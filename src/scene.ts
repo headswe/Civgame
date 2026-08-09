@@ -5,18 +5,24 @@ import { toWorld } from "./hex";
 import type { Game } from "./game";
 
 // Hex circumradius. At exactly 1 the flats of neighboring hexes touch
-// (centers are √3 apart, apothem is √3/2); a hair under leaves a seam line
-// without visible gaps.
-const TILE_R = 0.995;
+// (centers are √3 apart, apothem is √3/2), fusing same-height tiles into
+// continuous ground.
+const TILE_R = 1.0;
 
+// Uniform ground level everywhere except mountains (and slag, which sinks a
+// little, like the melted river it is) — so the floor reads as one continuous
+// surface instead of a field of mismatched plinths.
 const TERRAIN_STYLE: Record<Terrain, { color: number; height: number }> = {
-  [Terrain.Wastes]: { color: 0x8a7355, height: 0.3 },
-  [Terrain.Ashdunes]: { color: 0x6e6a63, height: 0.36 },
-  [Terrain.Highlands]: { color: 0x7d6b52, height: 0.72 },
-  [Terrain.Ruins]: { color: 0x5e6470, height: 0.42 },
-  [Terrain.Slag]: { color: 0x2b1812, height: 0.16 },
-  [Terrain.Geovent]: { color: 0x6b5a48, height: 0.38 },
+  [Terrain.Wastes]: { color: 0x8a7355, height: 0.32 },
+  [Terrain.Ashdunes]: { color: 0x6e6a63, height: 0.32 },
+  [Terrain.Highlands]: { color: 0x7d6b52, height: 0.58 },
+  [Terrain.Ruins]: { color: 0x5e6470, height: 0.32 },
+  [Terrain.Slag]: { color: 0x2b1812, height: 0.24 },
+  [Terrain.Geovent]: { color: 0x6b5a48, height: 0.32 },
 };
+
+/** World units of ground covered by one texture repeat (~2.5 hexes). */
+const UV_SCALE = 0.23;
 
 export class SceneView {
   renderer: THREE.WebGLRenderer;
@@ -40,7 +46,7 @@ export class SceneView {
   private raycaster = new THREE.Raycaster();
   private pointer = new THREE.Vector2();
 
-  private frustum = 14;
+  private frustum = 10.5;
   private camTarget = new THREE.Vector3();
   private startTime = performance.now();
 
@@ -179,13 +185,26 @@ export class SceneView {
     for (const t of game.tiles.values()) {
       const style = TERRAIN_STYLE[t.terrain];
       const geo = new THREE.CylinderGeometry(TILE_R, TILE_R, style.height, 6);
+      const { x, z } = toWorld(t);
+      // World-space UVs on the cap: the ground texture flows continuously
+      // across neighboring tiles instead of restarting at every hex border.
+      {
+        const pos = geo.attributes.position;
+        const nrm = geo.attributes.normal;
+        const uv = geo.attributes.uv;
+        for (let i = 0; i < pos.count; i++) {
+          if (nrm.getY(i) > 0.9) {
+            uv.setXY(i, (x + pos.getX(i)) * UV_SCALE, (z + pos.getZ(i)) * UV_SCALE);
+          }
+        }
+        uv.needsUpdate = true;
+      }
       // Material array: [side, top cap, bottom]. The cap gets a ground
       // texture when one exists; the side stays a darker cliff color.
       const sideColor = new THREE.Color(style.color).multiplyScalar(0.62).getHex();
       const side = new THREE.MeshLambertMaterial({ color: sideColor });
       const top = new THREE.MeshLambertMaterial({ color: style.color });
       const mesh = new THREE.Mesh(geo, [side, top, side]);
-      const { x, z } = toWorld(t);
       // Default cylinder orientation puts a vertex at +z and flats toward all
       // six neighbor directions of this layout — exact tessellation, no extra
       // rotation. (Rotating by 30° points corners at neighbors and opens gaps.)
@@ -236,6 +255,8 @@ export class SceneView {
         `textures/ground_${set.name}.png`,
         (tex) => {
           tex.colorSpace = THREE.SRGBColorSpace;
+          tex.wrapS = THREE.RepeatWrapping;
+          tex.wrapT = THREE.RepeatWrapping;
           for (const mesh of this.tileMeshes.values()) {
             if (!set.matches(mesh)) continue;
             if ((mesh.userData.texPriority ?? -1) >= set.priority) continue;
@@ -309,8 +330,11 @@ export class SceneView {
    */
   private decorateRuin(t: Tile, x: number, z: number, top: number, rnd: () => number) {
     const lam = (c: number) => new THREE.MeshLambertMaterial({ color: c });
+    // Scale-up so the set pieces read at gameplay zoom.
+    const S = 1.35;
     const put = (mesh: THREE.Mesh, dx: number, y: number, dz: number, ry = 0): THREE.Mesh => {
-      mesh.position.set(x + dx, top + y, z + dz);
+      mesh.scale.multiplyScalar(S);
+      mesh.position.set(x + dx * S, top + y * S, z + dz * S);
       mesh.rotation.y = ry;
       mesh.castShadow = true;
       this.addDecor(t, mesh);
@@ -451,14 +475,31 @@ export class SceneView {
       vent.position.set(x, top + 0.25, z);
       this.addDecor(t, vent);
       this.animated.push({ obj: vent, base: top + 0.25, phase: rnd() * 6, amp: 0.08 });
-    } else if (t.terrain === Terrain.Highlands && rnd() < 0.6) {
-      const rock = new THREE.Mesh(
-        new THREE.DodecahedronGeometry(0.18 + rnd() * 0.12),
-        new THREE.MeshLambertMaterial({ color: 0x6a5a45 }),
-      );
-      rock.position.set(x + (rnd() - 0.5) * 0.8, top + 0.12, z + (rnd() - 0.5) * 0.8);
-      rock.castShadow = true;
-      this.addDecor(t, rock);
+    } else if (t.terrain === Terrain.Highlands) {
+      // Rolling hills: a couple of rounded earthen mounds and some scree.
+      const mounds = 2 + Math.floor(rnd() * 2);
+      for (let i = 0; i < mounds; i++) {
+        const r = i === 0 ? 0.5 + rnd() * 0.16 : 0.24 + rnd() * 0.18;
+        const mound = new THREE.Mesh(
+          new THREE.SphereGeometry(r, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2),
+          new THREE.MeshLambertMaterial({ color: [0x7d6b52, 0x74644d, 0x857358][Math.floor(rnd() * 3)] }),
+        );
+        const a = rnd() * Math.PI * 2;
+        const rad = i === 0 ? rnd() * 0.2 : 0.3 + rnd() * 0.3;
+        mound.position.set(x + Math.cos(a) * rad, top, z + Math.sin(a) * rad);
+        mound.scale.y = 0.4 + rnd() * 0.18;
+        mound.castShadow = true;
+        this.addDecor(t, mound);
+      }
+      if (rnd() < 0.7) {
+        const rock = new THREE.Mesh(
+          new THREE.DodecahedronGeometry(0.1 + rnd() * 0.08),
+          new THREE.MeshLambertMaterial({ color: 0x6a5a45 }),
+        );
+        rock.position.set(x + (rnd() - 0.5) * 0.9, top + 0.07, z + (rnd() - 0.5) * 0.9);
+        rock.castShadow = true;
+        this.addDecor(t, rock);
+      }
     }
   }
 
