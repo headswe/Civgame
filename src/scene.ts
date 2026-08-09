@@ -66,6 +66,16 @@ export class SceneView {
   private tileTops = new Map<string, number>();
   private slagGlow = new Map<string, THREE.Mesh>();
   private slagGlowProto: THREE.ShaderMaterial | null = null;
+  private embers: {
+    obj: THREE.Mesh;
+    x: number;
+    z: number;
+    base: number;
+    rise: number;
+    speed: number;
+    phase: number;
+    drift: number;
+  }[] = [];
   private animated: { obj: THREE.Object3D; base: number; phase: number; amp: number }[] = [];
   private tweens: { obj: THREE.Object3D; from: THREE.Vector3; to: THREE.Vector3; start: number; dur: number }[] = [];
   private bursts: { obj: THREE.Mesh; start: number }[] = [];
@@ -218,6 +228,7 @@ export class SceneView {
     this.tileMeshes.clear();
     this.tileDecor.clear();
     this.slagGlow.clear();
+    this.embers = [];
     for (const t of game.tiles.values()) {
       const style = TERRAIN_STYLE[t.terrain];
       const { x, z } = toWorld(t);
@@ -250,6 +261,18 @@ export class SceneView {
         glowGeo.setDrawRange(geo.userData.capStart as number, geo.userData.capCount as number);
         const glowMat = this.slagGlowProto.clone();
         glowMat.uniforms.uTime = this.fogUniforms.uTime; // re-share the clock
+        glowMat.uniforms.uCenter.value.set(x, z);
+        // An arm to the shared edge of each adjacent slag tile; both sides
+        // reach the same midpoint, so the channel is continuous.
+        const segs = glowMat.uniforms.uSegs.value as THREE.Vector2[];
+        let nSeg = 0;
+        for (const nb of neighbors(t)) {
+          const nt = game.tiles.get(`${nb.q},${nb.r}`);
+          if (!nt || nt.terrain !== Terrain.Slag) continue;
+          const nw = toWorld(nt);
+          segs[nSeg++].set((nw.x - x) * 0.5, (nw.z - z) * 0.5);
+        }
+        glowMat.uniforms.uSegCount.value = nSeg;
         const glow = new THREE.Mesh(glowGeo, glowMat);
         glow.position.set(x, 0.008, z);
         glow.renderOrder = 1;
@@ -662,18 +685,33 @@ export class SceneView {
         plate.castShadow = true;
         this.addDecor(t, plate);
       }
-      const embers = 1 + Math.floor(rnd() * 3);
+      // Embers lift off the channel, drift, and burn out — then the cycle
+      // restarts from the crust, so it reads as convection, not bouncing.
+      const embers = 2 + Math.floor(rnd() * 3);
       for (let i = 0; i < embers; i++) {
         const ember = new THREE.Mesh(
-          new THREE.SphereGeometry(0.022 + rnd() * 0.018, 5, 4),
-          new THREE.MeshBasicMaterial({ color: rnd() < 0.5 ? 0xff8a3c : 0xffc86a }),
+          new THREE.SphereGeometry(0.02 + rnd() * 0.016, 5, 4),
+          new THREE.MeshBasicMaterial({
+            color: rnd() < 0.5 ? 0xff8a3c : 0xffc86a,
+            transparent: true,
+            depthWrite: false,
+          }),
         );
-        const dx = (rnd() - 0.5) * 1.1;
-        const dz = (rnd() - 0.5) * 1.1;
-        const base = top + this.displacementAt(t, x + dx, z + dz, x, z) + 0.2 + rnd() * 0.25;
+        const dx = (rnd() - 0.5) * 0.9;
+        const dz = (rnd() - 0.5) * 0.9;
+        const base = top + this.displacementAt(t, x + dx, z + dz, x, z) + 0.04;
         ember.position.set(x + dx, base, z + dz);
         this.addDecor(t, ember);
-        this.animated.push({ obj: ember, base, phase: rnd() * 6, amp: 0.1 + rnd() * 0.09 });
+        this.embers.push({
+          obj: ember,
+          x: x + dx,
+          z: z + dz,
+          base,
+          rise: 0.55 + rnd() * 0.5,
+          speed: 0.28 + rnd() * 0.22,
+          phase: rnd(),
+          drift: (rnd() - 0.5) * 0.24,
+        });
       }
     } else if (t.terrain === Terrain.Geovent) {
       const vent = new THREE.Mesh(
@@ -1326,6 +1364,19 @@ export class SceneView {
         mat.transparent = true;
       }
     }
+    for (const e of this.embers) {
+      if (!e.obj.visible) continue;
+      const life = (t * e.speed + e.phase) % 1;
+      e.obj.position.set(
+        e.x + e.drift * life + Math.sin(t * 1.7 + e.phase * 9) * 0.03,
+        e.base + life * e.rise,
+        e.z + e.drift * 0.6 * life,
+      );
+      // Bright at liftoff, guttering out near the top of the climb.
+      const mat = e.obj.material as THREE.MeshBasicMaterial;
+      mat.opacity = Math.min(1, life * 6) * (1 - life * life);
+    }
+
     this.selectionRing.rotation.y = t * 1.5;
     const s = 1 + 0.06 * Math.sin(t * 4);
     this.selectionRing.scale.set(s, 1, s);
@@ -1361,7 +1412,13 @@ export class SceneView {
  */
 function makeSlagGlowMaterial(uTime: { value: number }): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
-    uniforms: { uTime, uDim: { value: 1 } },
+    uniforms: {
+      uTime,
+      uDim: { value: 1 },
+      uCenter: { value: new THREE.Vector2() },
+      uSegs: { value: Array.from({ length: 6 }, () => new THREE.Vector2()) },
+      uSegCount: { value: 0 },
+    },
     transparent: true,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
@@ -1376,6 +1433,9 @@ function makeSlagGlowMaterial(uTime: { value: number }): THREE.ShaderMaterial {
     fragmentShader: /* glsl */ `
       uniform float uTime;
       uniform float uDim;
+      uniform vec2 uCenter;
+      uniform vec2 uSegs[6];
+      uniform int uSegCount;
       varying vec3 vWorld;
       float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
       float noise(vec2 p) {
@@ -1389,22 +1449,41 @@ function makeSlagGlowMaterial(uTime: { value: number }): THREE.ShaderMaterial {
         for (int i = 0; i < 4; i++) { v += a * noise(p); p *= 2.07; a *= 0.5; }
         return v;
       }
+      float segDist(vec2 p, vec2 b) {
+        float h = clamp(dot(p, b) / max(dot(b, b), 1e-5), 0.0, 1.0);
+        return length(p - b * h);
+      }
       void main() {
+        // Distance to the flow skeleton: a pool at the tile centre with arms
+        // reaching the shared edge of every adjacent slag tile, so the river
+        // joins up across the whole flow.
+        vec2 local = vWorld.xz - uCenter;
+        float d = length(local);
+        for (int i = 0; i < 6; i++) {
+          if (i >= uSegCount) break;
+          d = min(d, segDist(local, uSegs[i]));
+        }
+        // Meander the channel so it snakes between tiles instead of running
+        // in clean straight lines, with finer noise ragging the banks.
         vec2 p = vWorld.xz * 1.35;
-        // Ridged noise -> a network of thin fissures.
         float n = fbm(p + 0.35 * fbm(p * 0.7));
+        float meander = fbm(vWorld.xz * 0.52 + 11.0);
+        d += (meander - 0.5) * 0.62 + (n - 0.5) * 0.2;
+
+        float core = 1.0 - smoothstep(0.0, 0.13, d);   // molten centre
+        float bank = 1.0 - smoothstep(0.08, 0.46, d);  // cooling shoulder
+        // Hairline fractures spidering out of the channel into the crust.
         float ridge = 1.0 - abs(n * 2.0 - 1.0);
-        float crack = smoothstep(0.86, 0.998, ridge);
-        // Narrow halo of heat-stressed rock along each fissure.
-        float halo = smoothstep(0.68, 0.97, ridge) * 0.16;
+        float cracks = smoothstep(0.90, 0.999, ridge) * (1.0 - smoothstep(0.25, 1.05, d)) * 0.5;
+
         // Slow convective pulse, plus a faster flicker in the hottest cores.
-        float pulse = 0.72 + 0.28 * sin(uTime * 0.9 + n * 6.2);
-        float flicker = 0.9 + 0.1 * sin(uTime * 5.1 + vWorld.x * 3.0 + vWorld.z * 2.0);
-        float heat = (crack * flicker + halo) * pulse;
-        vec3 cool = vec3(0.55, 0.09, 0.02);
-        vec3 hot = vec3(1.0, 0.78, 0.32);
-        vec3 col = mix(cool, hot, smoothstep(0.25, 1.1, crack * flicker));
-        gl_FragColor = vec4(col * heat * 1.5, clamp(heat, 0.0, 1.0) * uDim);
+        float pulse = 0.78 + 0.22 * sin(uTime * 0.9 + n * 6.2);
+        float flicker = 0.92 + 0.08 * sin(uTime * 5.1 + vWorld.x * 3.0 + vWorld.z * 2.0);
+        float heat = (core * flicker + bank * 0.34 + cracks) * pulse;
+        vec3 cool = vec3(0.52, 0.08, 0.02);
+        vec3 hot = vec3(0.98, 0.62, 0.20);
+        vec3 col = mix(cool, hot, smoothstep(0.1, 0.95, core * flicker + cracks));
+        gl_FragColor = vec4(col * heat * 1.15, clamp(heat, 0.0, 1.0) * uDim);
       }
     `,
   });
