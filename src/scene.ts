@@ -4,7 +4,10 @@ import { FACTIONS, UNITS } from "./content";
 import { toWorld } from "./hex";
 import type { Game } from "./game";
 
-const TILE_R = 0.96; // slightly under hex size so seams read as tiles
+// Hex circumradius. At exactly 1 the flats of neighboring hexes touch
+// (centers are √3 apart, apothem is √3/2); a hair under leaves a seam line
+// without visible gaps.
+const TILE_R = 0.995;
 
 const TERRAIN_STYLE: Record<Terrain, { color: number; height: number }> = {
   [Terrain.Wastes]: { color: 0x8a7355, height: 0.3 },
@@ -173,8 +176,10 @@ export class SceneView {
       const mat = new THREE.MeshLambertMaterial({ color: style.color });
       const mesh = new THREE.Mesh(geo, mat);
       const { x, z } = toWorld(t);
+      // Default cylinder orientation puts a vertex at +z and flats toward all
+      // six neighbor directions of this layout — exact tessellation, no extra
+      // rotation. (Rotating by 30° points corners at neighbors and opens gaps.)
       mesh.position.set(x, style.height / 2, z);
-      mesh.rotation.y = Math.PI / 6; // pointy-top alignment
       mesh.receiveShadow = true;
       mesh.castShadow = t.terrain === Terrain.Highlands;
       mesh.userData.tile = { q: t.q, r: t.r };
@@ -217,7 +222,6 @@ export class SceneView {
         new THREE.MeshBasicMaterial({ color: 0xff5a1f }),
       );
       glow.position.set(x, top + 0.012, z);
-      glow.rotation.y = Math.PI / 6;
       this.addDecor(t, glow);
       this.animated.push({ obj: glow, base: top + 0.012, phase: rnd() * 6, amp: 0 });
     } else if (t.terrain === Terrain.Geovent) {
@@ -492,7 +496,6 @@ export class SceneView {
         const m = new THREE.Mesh(geo, mat);
         const { x, z } = toWorld(c);
         m.position.set(x, this.groundY(c.q, c.r) + 0.03, z);
-        m.rotation.y = Math.PI / 6;
         m.userData.tile = { q: c.q, r: c.r };
         this.highlightGroup.add(m);
       }
