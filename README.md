@@ -24,6 +24,10 @@ Then open the printed URL (usually http://localhost:5173).
 
 - **Power ⚡** — the sole currency. Buildings and units cost power; units drain
   upkeep every turn. Go negative and the grid browns out, damaging your army.
+- **Water 💧** — coolant for your AI cores. Every server rack drinks 2💧/turn
+  (reactors need 1 too). Run the reservoir dry and the cores throttle: no
+  compute at all that turn, and the racks cook themselves. Water Condensers
+  wring it out of the ash haze.
 - **Compute ▣** — produced by Server Racks. Accumulated compute advances your
   era: Salvage Age → Chatbot Era → Agentic Era → AGI (Trust Us This Time) →
   **The Singularity** (instant victory at 260▣).
@@ -32,7 +36,8 @@ Then open the printed URL (usually http://localhost:5173).
   sight (drones and citadels see furthest); explored ground stays on the map as
   dim memory, but enemy units only exist where you can currently see.
 - Scavenge pre-Collapse **ruins** with drones for +15⚡ lump sums.
-- Build **Fusion Reactors** on geothermal vents for +5⚡ bonus.
+- **Geothermal vents are contested ground**: a vent can host a Fusion Reactor
+  (+5⚡) *or* a Water Condenser (+4💧) — never both. Power or coolant, choose.
 - **Turrets** auto-fire at adjacent enemies. **Slag flows** are impassable.
 
 ### The techno-kings

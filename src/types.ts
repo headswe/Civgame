@@ -27,13 +27,15 @@ export type BuildingKind =
   | "reactor"
   | "servers"
   | "mechworks"
-  | "turret";
+  | "turret"
+  | "condenser";
 
 export interface BuildingDef {
   kind: BuildingKind;
   name: string;
   cost: number;
   power: number; // net power per turn (may be negative)
+  water: number; // net water per turn (negative = needs cooling)
   compute: number; // compute per turn
   hp: number;
   tier: number; // min tech tier required
@@ -88,7 +90,9 @@ export interface FactionDef {
 export interface FactionState {
   def: FactionDef;
   power: number;
+  water: number; // reservoir; server racks drink it to stay cool
   compute: number; // accumulated, drives tiers — never spent
+  overheated: boolean; // ran dry last turn: cores throttled
   alive: boolean;
   isPlayer: boolean;
 }

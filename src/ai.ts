@@ -25,12 +25,14 @@ export function runAiTurn(game: Game, f: number) {
 function aiBuild(game: Game, f: number) {
   const fs = game.factions[f];
   const income = game.powerIncome(f);
+  const water = game.waterIncome(f);
   const options = game.availableBuildings(f);
   const count = (kind: string) => game.buildings.filter((b) => b.faction === f && b.kind === kind).length;
 
-  // Priority: keep power positive, then compute, then war infrastructure.
+  // Priority: don't cook the cores, keep power positive, then compute, then war.
   let want: string | null = null;
-  if (income < 4) want = options.find((o) => o.def.kind === "reactor")?.ok ? "reactor" : "solar";
+  if (water < 0 || (water < 2 && fs.water < 8)) want = "condenser";
+  else if (income < 4) want = options.find((o) => o.def.kind === "reactor")?.ok ? "reactor" : "solar";
   else if (count("servers") < 2 + Math.floor(game.turn / 8)) want = "servers";
   else if (count("mechworks") === 0 && game.tierOf(f) >= 2) want = "mechworks";
   else if (count("turret") < 2 && game.tierOf(f) >= 1 && Math.random() < 0.5) want = "turret";
@@ -46,7 +48,8 @@ function aiBuild(game: Game, f: number) {
   const citadel = game.buildings.find((b) => b.faction === f && b.kind === "citadel");
   if (!citadel) return;
   let plot: Tile | undefined;
-  if (want === "reactor") plot = plots.find((t) => t.terrain === Terrain.Geovent);
+  // Vents are contested: a reactor wants one, so does a condenser.
+  if (want === "reactor" || want === "condenser") plot = plots.find((t) => t.terrain === Terrain.Geovent);
   if (!plot) {
     plots.sort((a, b) => distance(a, citadel) - distance(b, citadel));
     plot = plots[0];

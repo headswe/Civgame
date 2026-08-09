@@ -1,5 +1,6 @@
 import { Terrain, type Building, type BuildingKind, type Tile, type Unit } from "./types";
 import { BUILDINGS, FACTIONS, TIERS, UNITS } from "./content";
+import { GEOVENT_WATER_BONUS } from "./game";
 import { key } from "./hex";
 import type { Game, LogKind } from "./game";
 import { runAiTurn } from "./ai";
@@ -18,7 +19,7 @@ const TERRAIN_LABEL: Record<Terrain, string> = {
   [Terrain.Highlands]: "Highlands — +2 defense",
   [Terrain.Ruins]: "Pre-Collapse Ruins — +1 defense, scavengeable",
   [Terrain.Slag]: "Slag Flow — impassable melted city",
-  [Terrain.Geovent]: "Geothermal Vent — reactors built here get +5⚡",
+  [Terrain.Geovent]: "Geothermal Vent — reactors get +5⚡, condensers +4💧 here",
 };
 
 const RUIN_LABEL: Record<string, string> = {
@@ -221,10 +222,13 @@ export class GameUI {
     const progress = nextTier
       ? Math.min(100, Math.round(((f.compute - TIERS[tier].compute) / (nextTier.compute - TIERS[tier].compute)) * 100))
       : 100;
+    const water = this.game.waterIncome(p);
+    const dry = f.water + water < 0;
     this.topbar.innerHTML = `
       <span class="faction-chip" style="background:${f.def.cssColor}">${f.def.name}</span>
       <span class="stat power">⚡ <b>${f.power}</b> <span class="${income < 0 ? "neg" : ""}">(${income >= 0 ? "+" : ""}${income}/t)</span></span>
-      <span class="stat compute">▣ <b>${f.compute}</b> (+${this.game.computeIncome(p)}/t)</span>
+      <span class="stat water" title="Server racks need water to stay cool. Run dry and your cores throttle and cook.">💧 <b>${f.water}</b> <span class="${dry ? "neg" : ""}">(${water >= 0 ? "+" : ""}${water}/t)</span></span>
+      <span class="stat compute">▣ <b>${f.compute}</b> ${f.overheated ? '<span class="neg">OVERHEATED</span>' : `(+${this.game.computeIncome(p)}/t)`}</span>
       <span class="tier">era: <b>${TIERS[tier].name}</b>${nextTier ? ` → ${nextTier.name}` : ""}</span>
       <span class="erabar" title="${nextTier ? `${f.compute}/${nextTier.compute}▣ to ${nextTier.name}` : "ascension complete"}"><i style="width:${progress}%"></i></span>
       <span class="spacer"></span>
@@ -251,7 +255,8 @@ export class GameUI {
           Left-click: select / move / attack.<br>
           Right-drag or WASD: pan camera. Wheel: zoom.<br>
           Select your Citadel to build and produce.<br>
-          Power ⚡ pays for everything. Compute ▣ advances your era.<br>
+          Power ⚡ pays for everything. Water 💧 cools your AI cores.<br>
+          Compute ▣ advances your era. Vents can host a reactor <i>or</i> a condenser — choose.<br>
           Win by razing every rival citadel — or by reaching ${TIERS[TIERS.length - 1].compute}▣ and ascending.
         </div>`;
       return;
@@ -284,10 +289,12 @@ export class GameUI {
       const b = this.selection.building;
       const d = BUILDINGS[b.kind];
       const own = b.faction === p;
+      const onVent = this.game.tile(b.q, b.r)?.terrain === Terrain.Geovent;
       el.innerHTML = `<h3 style="color:${FACTIONS[b.faction].cssColor}">${d.name.toUpperCase()}</h3>
         <div class="sub">${FACTIONS[b.faction].name}</div>
         <div class="row">HP ${b.hp}/${d.hp}</div>
         ${d.power ? `<div class="row">Power: ${d.power > 0 ? "+" : ""}${d.power}⚡/turn</div>` : ""}
+        ${d.water ? `<div class="row">Water: ${d.water > 0 ? "+" : ""}${d.water}${onVent && b.kind === "condenser" ? ` (+${GEOVENT_WATER_BONUS} vent)` : ""}💧/turn</div>` : ""}
         ${d.compute ? `<div class="row">Compute: +${d.compute}▣/turn</div>` : ""}
         <hr>`;
 
@@ -317,8 +324,13 @@ export class GameUI {
           const btn = document.createElement("button");
           btn.className = "btn";
           btn.disabled = !opt.ok;
+          const flow = [
+            opt.def.power ? `${opt.def.power > 0 ? "+" : ""}${opt.def.power}⚡` : "",
+            opt.def.water ? `${opt.def.water > 0 ? "+" : ""}${opt.def.water}💧` : "",
+            opt.def.compute ? `+${opt.def.compute}▣` : "",
+          ].filter(Boolean).join(" · ");
           btn.innerHTML = `${opt.def.name} <span class="cost">${opt.cost}⚡</span>
-            <span class="desc">${opt.def.desc}${opt.why ? ` — ${opt.why}` : ""}</span>`;
+            <span class="desc">${flow ? `${flow} — ` : ""}${opt.def.desc}${opt.why ? ` — ${opt.why}` : ""}</span>`;
           btn.onclick = () => {
             this.buildMode = opt.def.kind;
             this.refresh();

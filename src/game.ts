@@ -17,6 +17,7 @@ export type LogKind = "info" | "quote" | "combat" | "good";
 export type LogFn = (msg: string, kind?: LogKind) => void;
 
 export const GEOVENT_BONUS = 5;
+export const GEOVENT_WATER_BONUS = 4;
 export const RUIN_LOOT = 15;
 export const BUILD_RANGE = 2;
 export const SIGHT_RANGE = 2;
@@ -61,7 +62,9 @@ export class Game {
     this.factions = FACTIONS.map((def, i) => ({
       def,
       power: 40,
+      water: 10,
       compute: def.perk === "We Had It All Along" ? 25 : 0,
+      overheated: false,
       alive: true,
       isPlayer: i === playerFaction,
     }));
@@ -156,6 +159,18 @@ export class Game {
       }
     }
     for (const u of this.units) if (u.faction === f) income -= UNITS[u.kind].upkeep;
+    return income;
+  }
+
+  waterIncome(f: number): number {
+    let income = 0;
+    for (const b of this.buildings) {
+      if (b.faction !== f) continue;
+      income += BUILDINGS[b.kind].water;
+      if (b.kind === "condenser" && this.tile(b.q, b.r)?.terrain === Terrain.Geovent) {
+        income += GEOVENT_WATER_BONUS;
+      }
+    }
     return income;
   }
 
@@ -461,7 +476,22 @@ export class Game {
       if (!fs.alive) continue;
       const prevTier = this.tierOf(f);
       fs.power += this.powerIncome(f);
-      fs.compute += this.computeIncome(f);
+      fs.water += this.waterIncome(f);
+
+      // Coolant crisis: with the reservoir dry the cores throttle to nothing
+      // and cook themselves. Water is the price of thinking.
+      fs.overheated = fs.water < 0;
+      if (fs.overheated) {
+        fs.water = 0;
+        for (const b of [...this.buildings]) {
+          if (b.faction !== f || b.kind !== "servers") continue;
+          b.hp -= 2;
+          if (b.hp <= 0) this.destroyBuilding(b);
+        }
+        if (fs.isPlayer) this.log(pick(ADVISOR.overheat), "quote");
+      } else {
+        fs.compute += this.computeIncome(f);
+      }
 
       if (fs.power < 0) {
         fs.power = 0;

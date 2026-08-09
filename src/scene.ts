@@ -66,6 +66,8 @@ export class SceneView {
   private tileTops = new Map<string, number>();
   private slagGlow = new Map<string, THREE.Mesh>();
   private slagGlowProto: THREE.ShaderMaterial | null = null;
+  private pools = new Map<string, THREE.Mesh>();
+  private poolProto: THREE.ShaderMaterial | null = null;
   private embers: {
     obj: THREE.Mesh;
     x: number;
@@ -76,6 +78,17 @@ export class SceneView {
     phase: number;
     drift: number;
   }[] = [];
+  private steam: {
+    obj: THREE.Mesh;
+    x: number;
+    z: number;
+    base: number;
+    rise: number;
+    speed: number;
+    phase: number;
+    drift: number;
+    ventPhase: number;
+  }[] = [];
   private animated: { obj: THREE.Object3D; base: number; phase: number; amp: number }[] = [];
   private tweens: { obj: THREE.Object3D; from: THREE.Vector3; to: THREE.Vector3; start: number; dur: number }[] = [];
   private bursts: { obj: THREE.Mesh; start: number }[] = [];
@@ -85,6 +98,14 @@ export class SceneView {
   private pointer = new THREE.Vector2();
 
   private frustum = 10.5;
+  /** Fixed billboard orientation: the iso camera never rotates. */
+  private billboardQuat = new THREE.Quaternion().setFromRotationMatrix(
+    new THREE.Matrix4().lookAt(
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(1, 1.15, 1).normalize(),
+      new THREE.Vector3(0, 1, 0),
+    ),
+  );
   private camTarget = new THREE.Vector3();
   private startTime = performance.now();
 
@@ -228,7 +249,9 @@ export class SceneView {
     this.tileMeshes.clear();
     this.tileDecor.clear();
     this.slagGlow.clear();
+    this.pools.clear();
     this.embers = [];
+    this.steam = [];
     for (const t of game.tiles.values()) {
       const style = TERRAIN_STYLE[t.terrain];
       const { x, z } = toWorld(t);
@@ -338,6 +361,15 @@ export class SceneView {
         0.022 * Math.sin(wz * 4.3 - 1.1 * Math.sin(wx * 2.7));
       return Math.pow(rim, 0.6) * (sag + plates);
     }
+    if (t.terrain === Terrain.Geovent) {
+      // A sinter cone: mineral rim built up by centuries of spray, with the
+      // vent pool sunk in the middle.
+      const d = Math.hypot(lx, lz);
+      const rimRing = 0.17 * Math.exp(-Math.pow((d - 0.66) / 0.22, 2));
+      const basin = -0.12 * (1 - Math.min(1, Math.pow(d / 0.52, 2)));
+      const crust = 0.018 * Math.sin(wx * 6.1 + wz * 4.3);
+      return Math.pow(rim, 0.55) * (rimRing + basin + crust);
+    }
     return 0;
   }
 
@@ -349,7 +381,10 @@ export class SceneView {
   private buildTileGeometry(t: Tile, game: Game, x: number, z: number): THREE.BufferGeometry {
     const style = TERRAIN_STYLE[t.terrain];
     const displaced =
-      t.terrain === Terrain.Highlands || t.terrain === Terrain.Ashdunes || t.terrain === Terrain.Slag;
+      t.terrain === Terrain.Highlands ||
+      t.terrain === Terrain.Ashdunes ||
+      t.terrain === Terrain.Slag ||
+      t.terrain === Terrain.Geovent;
     const S = displaced ? 8 : 1;
     const H = style.height;
 
@@ -714,13 +749,72 @@ export class SceneView {
         });
       }
     } else if (t.terrain === Terrain.Geovent) {
-      const vent = new THREE.Mesh(
-        new THREE.ConeGeometry(0.22, 0.5, 6),
-        new THREE.MeshBasicMaterial({ color: 0x54e0e8 }),
+      const basin = top + this.displacementAt(t, x, z, x, z);
+      // Mineral-banded spring pool sunk in the basin.
+      if (!this.poolProto) this.poolProto = makePoolMaterial(this.fogUniforms.uTime);
+      const poolMat = this.poolProto.clone();
+      poolMat.uniforms.uTime = this.fogUniforms.uTime;
+      const pool = new THREE.Mesh(new THREE.CircleGeometry(0.52, 28), poolMat);
+      pool.rotation.x = -Math.PI / 2;
+      pool.position.set(x, basin + 0.055, z);
+      pool.renderOrder = 1;
+      this.terrainGroup.add(pool);
+      this.pools.set(`${t.q},${t.r}`, pool);
+      const lip = new THREE.Mesh(
+        new THREE.TorusGeometry(0.53, 0.03, 6, 26),
+        new THREE.MeshLambertMaterial({ color: 0xa9b3a2 }),
       );
-      vent.position.set(x, top + 0.25, z);
-      this.addDecor(t, vent);
-      this.animated.push({ obj: vent, base: top + 0.25, phase: rnd() * 6, amp: 0.08 });
+      lip.rotation.x = -Math.PI / 2;
+      lip.position.set(x, basin + 0.048, z);
+      this.addDecor(t, lip);
+      // Sinter terraces crusted in a broken ring around the cone.
+      const pads = 5 + Math.floor(rnd() * 3);
+      const ringStart = rnd() * Math.PI * 2;
+      for (let i = 0; i < pads; i++) {
+        if (rnd() < 0.2) continue; // a broken, uneven crust ring
+        const a = ringStart + (i / pads) * Math.PI * 2 + (rnd() - 0.5) * 0.5;
+        const rad = 0.66 + rnd() * 0.2;
+        const dx = Math.cos(a) * rad;
+        const dz = Math.sin(a) * rad;
+        const pad = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.08 + rnd() * 0.1, 0.11 + rnd() * 0.1, 0.02 + rnd() * 0.02, 7),
+          new THREE.MeshLambertMaterial({ color: [0x8d9a90, 0x7f8d85, 0x96a397][Math.floor(rnd() * 3)] }),
+        );
+        pad.position.set(x + dx, top + this.displacementAt(t, x + dx, z + dz, x, z) + 0.012, z + dz);
+        pad.rotation.y = rnd() * Math.PI;
+        this.addDecor(t, pad);
+      }
+      // The plume: steam puffs climbing out of the pool, surging on the
+      // vent's own eruption cycle.
+      const ventPhase = rnd();
+      for (let i = 0; i < 8; i++) {
+        const puff = new THREE.Mesh(
+          new THREE.PlaneGeometry(0.55, 0.55),
+          new THREE.MeshBasicMaterial({
+            color: 0xdff1ee,
+            map: puffTexture(),
+            transparent: true,
+            opacity: 0,
+            depthWrite: false,
+          }),
+        );
+        // The camera angle never changes, so one fixed billboard rotation
+        // keeps every puff facing it.
+        puff.quaternion.copy(this.billboardQuat);
+        puff.position.set(x, basin + 0.1, z);
+        this.addDecor(t, puff);
+        this.steam.push({
+          obj: puff,
+          x,
+          z,
+          base: basin + 0.08,
+          rise: 0.9 + rnd() * 0.5,
+          speed: 0.34 + rnd() * 0.12,
+          phase: i / 6 + rnd() * 0.05,
+          drift: (rnd() - 0.5) * 0.3,
+          ventPhase,
+        });
+      }
     } else if (t.terrain === Terrain.Highlands) {
       // The tile itself is the hill now; just a rock or two on the slope.
       const rocks = rnd() < 0.75 ? 1 + Math.floor(rnd() * 2) : 0;
@@ -781,6 +875,11 @@ export class SceneView {
         // Molten light still shows through fog, just banked down.
         glow.visible = explored;
         (glow.material as THREE.ShaderMaterial).uniforms.uDim.value = seen ? 1 : 0.5;
+      }
+      const pool = this.pools.get(k);
+      if (pool) {
+        pool.visible = explored;
+        (pool.material as THREE.ShaderMaterial).uniforms.uDim.value = factor;
       }
     }
     this.updateFogField(game);
@@ -1137,6 +1236,26 @@ export class SceneView {
         add(stack, 0.8);
         break;
       }
+      case "condenser": {
+        // Chilled coils over a collection tank, dripping into a catch basin.
+        add(new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.38, 0.28, 10), dark), 0.14);
+        const tank = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.26, 0.26, 0.42, 10),
+          new THREE.MeshLambertMaterial({ color: 0x8d99a3 }),
+        );
+        add(tank, 0.49);
+        for (let i = 0; i < 3; i++) {
+          const coil = new THREE.Mesh(new THREE.TorusGeometry(0.29, 0.028, 6, 14), accent);
+          coil.rotation.x = Math.PI / 2;
+          add(coil, 0.36 + i * 0.14);
+        }
+        const cap = new THREE.Mesh(
+          new THREE.SphereGeometry(0.26, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2),
+          new THREE.MeshLambertMaterial({ color: 0x7fb8ad }),
+        );
+        add(cap, 0.7);
+        break;
+      }
       case "turret": {
         add(new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 0.3, 8), dark), 0.15);
         add(new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 10), accent), 0.42);
@@ -1377,6 +1496,24 @@ export class SceneView {
       mat.opacity = Math.min(1, life * 6) * (1 - life * life);
     }
 
+    for (const s of this.steam) {
+      if (!s.obj.visible) continue;
+      // Each vent breathes on its own cycle: a long simmer, then a surge.
+      const cyc = (t * 0.13 + s.ventPhase) % 1;
+      const surge = cyc < 0.3 ? Math.sin((cyc / 0.3) * Math.PI) : 0;
+      const life = (t * s.speed + s.phase) % 1;
+      const rise = s.rise * (0.45 + surge * 1.25);
+      s.obj.position.set(
+        s.x + s.drift * life * (1 + surge),
+        s.base + life * rise,
+        s.z + s.drift * 0.7 * life * (1 + surge),
+      );
+      // Puffs bloom as they climb and thin out into the ash haze.
+      s.obj.scale.setScalar(0.5 + life * (1.5 + surge * 1.2));
+      const mat = s.obj.material as THREE.MeshBasicMaterial;
+      mat.opacity = (0.16 + surge * 0.5) * Math.min(1, life * 5) * (1 - life * life);
+    }
+
     this.selectionRing.rotation.y = t * 1.5;
     const s = 1 + 0.06 * Math.sin(t * 4);
     this.selectionRing.scale.set(s, 1, s);
@@ -1403,6 +1540,65 @@ export class SceneView {
 
     this.renderer.render(this.scene, this.camera);
   }
+}
+
+/**
+ * A geothermal spring pool. Colour bands run from a deep mineral blue at the
+ * hot centre out through teal to a pale sinter rim (the Grand Prismatic
+ * gradient), with slow concentric ripples and a faint drifting sheen.
+ */
+function makePoolMaterial(uTime: { value: number }): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime, uDim: { value: 1 } },
+    transparent: true,
+    depthWrite: false,
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      varying vec3 vWorld;
+      void main() {
+        vUv = uv;
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorld = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uDim;
+      varying vec2 vUv;
+      varying vec3 vWorld;
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+      float noise(vec2 p) {
+        vec2 i = floor(p), f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+                   mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+      }
+      void main() {
+        float r = length(vUv - 0.5) * 2.0;
+        if (r > 1.0) discard;
+        // Ripples spreading from the vent mouth, plus a wandering surface wobble.
+        float ripple = sin(r * 16.0 - uTime * 1.5) * 0.5 + 0.5;
+        float wobble = noise(vWorld.xz * 5.5 + uTime * 0.25);
+        float band = clamp(r + (wobble - 0.5) * 0.16 - ripple * 0.03, 0.0, 1.0);
+
+        // Linear-space values: the renderer converts to sRGB, which lifts
+        // these considerably, so they are deliberately dark here.
+        vec3 hot  = vec3(0.010, 0.070, 0.135); // deep mineral blue
+        vec3 mid  = vec3(0.022, 0.170, 0.165); // algal teal
+        vec3 warm = vec3(0.150, 0.185, 0.100); // shallow green-gold
+        vec3 rim  = vec3(0.310, 0.300, 0.215); // pale sinter crust
+        vec3 col = mix(hot, mid, smoothstep(0.0, 0.45, band));
+        col = mix(col, warm, smoothstep(0.45, 0.80, band));
+        col = mix(col, rim, smoothstep(0.80, 1.0, band));
+        // A soft sheen where the ripples catch the sky.
+        col += vec3(0.02, 0.03, 0.035) * ripple * (1.0 - band);
+
+        float alpha = mix(0.92, 0.55, smoothstep(0.7, 1.0, r));
+        gl_FragColor = vec4(col * uDim, alpha * uDim);
+      }
+    `,
+  });
 }
 
 /**
@@ -1590,6 +1786,23 @@ function makeCloudMaterial(
       }
     `,
   });
+}
+
+/** Soft radial-gradient sprite texture, built once and shared by all puffs. */
+let _puffTex: THREE.CanvasTexture | null = null;
+function puffTexture(): THREE.CanvasTexture {
+  if (_puffTex) return _puffTex;
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  const g = c.getContext("2d")!;
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.45, "rgba(255,255,255,0.55)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  _puffTex = new THREE.CanvasTexture(c);
+  return _puffTex;
 }
 
 function dimGroup(g: THREE.Object3D, factor: number) {
