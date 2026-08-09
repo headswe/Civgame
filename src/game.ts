@@ -19,6 +19,8 @@ export type LogFn = (msg: string, kind?: LogKind) => void;
 export const GEOVENT_BONUS = 5;
 export const RUIN_LOOT = 15;
 export const BUILD_RANGE = 2;
+export const SIGHT_RANGE = 2;
+export const SIGHT_RANGE_FAR = 3; // drones aloft and citadel watchtowers
 
 export interface GameResult {
   winner: number;
@@ -34,6 +36,10 @@ export class Game {
   playerFaction = 0;
   result: GameResult | null = null;
   log: LogFn = () => {};
+
+  /** Fog of war, player's-eye view. The AI techno-kings cheat; of course they do. */
+  explored = new Set<string>();
+  visible = new Set<string>();
 
   private nextUnitId = 1;
 
@@ -61,6 +67,43 @@ export class Game {
         }
       }
     });
+
+    this.recomputeVision();
+  }
+
+  /** Recompute what the player currently sees; anything seen once stays explored. */
+  recomputeVision() {
+    this.visible.clear();
+    const p = this.playerFaction;
+    const sources: { q: number; r: number; range: number }[] = [];
+    for (const u of this.units) {
+      if (u.faction === p) {
+        sources.push({ q: u.q, r: u.r, range: u.kind === "drone" ? SIGHT_RANGE_FAR : SIGHT_RANGE });
+      }
+    }
+    for (const b of this.buildings) {
+      if (b.faction === p) {
+        sources.push({ q: b.q, r: b.r, range: b.kind === "citadel" ? SIGHT_RANGE_FAR : SIGHT_RANGE });
+      }
+    }
+    for (const t of this.tiles.values()) {
+      for (const s of sources) {
+        if (distance(t, s) <= s.range) {
+          const k = key(t.q, t.r);
+          this.visible.add(k);
+          this.explored.add(k);
+          break;
+        }
+      }
+    }
+  }
+
+  isVisible(q: number, r: number): boolean {
+    return this.visible.has(key(q, r));
+  }
+
+  isExplored(q: number, r: number): boolean {
+    return this.explored.has(key(q, r));
   }
 
   // ------------------------------------------------------------------ helpers

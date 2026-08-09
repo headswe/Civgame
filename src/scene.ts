@@ -24,6 +24,7 @@ export class SceneView {
   private dynamicGroup = new THREE.Group();
   private highlightGroup = new THREE.Group();
   private tileMeshes = new Map<string, THREE.Mesh>();
+  private tileDecor = new Map<string, THREE.Mesh[]>();
   private tileTops = new Map<string, number>();
   private animated: { obj: THREE.Object3D; base: number; phase: number; amp: number }[] = [];
   private selectionRing: THREE.Mesh;
@@ -153,6 +154,7 @@ export class SceneView {
   buildMap(game: Game) {
     this.terrainGroup.clear();
     this.tileMeshes.clear();
+    this.tileDecor.clear();
     for (const t of game.tiles.values()) {
       const style = TERRAIN_STYLE[t.terrain];
       const geo = new THREE.CylinderGeometry(TILE_R, TILE_R, style.height, 6);
@@ -164,12 +166,22 @@ export class SceneView {
       mesh.receiveShadow = true;
       mesh.castShadow = t.terrain === Terrain.Highlands;
       mesh.userData.tile = { q: t.q, r: t.r };
+      mesh.userData.baseColor = style.color;
       this.terrainGroup.add(mesh);
       this.tileMeshes.set(`${t.q},${t.r}`, mesh);
       this.tileTops.set(`${t.q},${t.r}`, style.height);
 
       this.decorateTile(t, x, z, style.height);
     }
+  }
+
+  private addDecor(t: Tile, mesh: THREE.Mesh) {
+    mesh.userData.baseColor = ((mesh.material as THREE.MeshLambertMaterial).color as THREE.Color).getHex();
+    this.terrainGroup.add(mesh);
+    const k = `${t.q},${t.r}`;
+    const list = this.tileDecor.get(k) ?? [];
+    list.push(mesh);
+    this.tileDecor.set(k, list);
   }
 
   private decorateTile(t: Tile, x: number, z: number, top: number) {
@@ -185,7 +197,7 @@ export class SceneView {
         box.position.set(x + (rnd() - 0.5) * 0.9, top + h / 2, z + (rnd() - 0.5) * 0.9);
         box.rotation.y = rnd() * Math.PI;
         box.castShadow = true;
-        this.terrainGroup.add(box);
+        this.addDecor(t, box);
       }
     } else if (t.terrain === Terrain.Slag) {
       const glow = new THREE.Mesh(
@@ -194,7 +206,7 @@ export class SceneView {
       );
       glow.position.set(x, top + 0.012, z);
       glow.rotation.y = Math.PI / 6;
-      this.terrainGroup.add(glow);
+      this.addDecor(t, glow);
       this.animated.push({ obj: glow, base: top + 0.012, phase: rnd() * 6, amp: 0 });
     } else if (t.terrain === Terrain.Geovent) {
       const vent = new THREE.Mesh(
@@ -202,7 +214,7 @@ export class SceneView {
         new THREE.MeshBasicMaterial({ color: 0x54e0e8 }),
       );
       vent.position.set(x, top + 0.25, z);
-      this.terrainGroup.add(vent);
+      this.addDecor(t, vent);
       this.animated.push({ obj: vent, base: top + 0.25, phase: rnd() * 6, amp: 0.08 });
     } else if (t.terrain === Terrain.Highlands && rnd() < 0.6) {
       const rock = new THREE.Mesh(
@@ -211,7 +223,7 @@ export class SceneView {
       );
       rock.position.set(x + (rnd() - 0.5) * 0.8, top + 0.12, z + (rnd() - 0.5) * 0.8);
       rock.castShadow = true;
-      this.terrainGroup.add(rock);
+      this.addDecor(t, rock);
     }
   }
 
@@ -219,18 +231,42 @@ export class SceneView {
 
   /** Rebuild buildings + units from state. Cheap at this scale, always correct. */
   sync(game: Game) {
+    game.recomputeVision();
     this.dynamicGroup.clear();
     this.animated = this.animated.filter((a) => a.obj.parent === this.terrainGroup || a.obj.parent === this.scene);
 
+    const EXPLORED_DIM = 0.38;
     for (const t of game.tiles.values()) {
-      // Looted ruins go dim.
-      if (t.terrain === Terrain.Ruins) {
-        const m = this.tileMeshes.get(`${t.q},${t.r}`);
-        if (m) (m.material as THREE.MeshLambertMaterial).color.set(t.looted ? 0x3f434c : 0x5e6470);
+      const k = `${t.q},${t.r}`;
+      const mesh = this.tileMeshes.get(k);
+      if (!mesh) continue;
+      // Looted ruins go dim permanently, on top of fog.
+      if (t.terrain === Terrain.Ruins) mesh.userData.baseColor = t.looted ? 0x3f434c : 0x5e6470;
+
+      const explored = game.isExplored(t.q, t.r);
+      const seen = game.isVisible(t.q, t.r);
+      const factor = seen ? 1 : EXPLORED_DIM;
+      mesh.visible = explored;
+      (mesh.material as THREE.MeshLambertMaterial).color.set(mesh.userData.baseColor as number).multiplyScalar(factor);
+      for (const d of this.tileDecor.get(k) ?? []) {
+        d.visible = explored;
+        (d.material as THREE.MeshLambertMaterial).color.set(d.userData.baseColor as number).multiplyScalar(factor);
       }
     }
-    for (const b of game.buildings) this.dynamicGroup.add(this.buildingMesh(b));
-    for (const u of game.units) this.dynamicGroup.add(this.unitMesh(u));
+
+    for (const b of game.buildings) {
+      // Buildings persist on explored ground as dim silhouettes; unexplored stays secret.
+      if (!game.isExplored(b.q, b.r)) continue;
+      const seen = game.isVisible(b.q, b.r);
+      const g = this.buildingMesh(b);
+      if (!seen) dimGroup(g, EXPLORED_DIM);
+      this.dynamicGroup.add(g);
+    }
+    for (const u of game.units) {
+      // Units only exist where you can currently see. Yours always can.
+      if (!game.isVisible(u.q, u.r)) continue;
+      this.dynamicGroup.add(this.unitMesh(u));
+    }
   }
 
   private groundY(q: number, r: number): number {
@@ -515,6 +551,13 @@ export class SceneView {
     this.selectionRing.scale.set(s, 1, s);
     this.renderer.render(this.scene, this.camera);
   }
+}
+
+function dimGroup(g: THREE.Object3D, factor: number) {
+  g.traverse((o) => {
+    const m = (o as THREE.Mesh).material as THREE.MeshLambertMaterial | undefined;
+    if (m && "color" in m) m.color.multiplyScalar(factor);
+  });
 }
 
 function mulberry(seed: number) {

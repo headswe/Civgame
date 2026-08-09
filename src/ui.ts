@@ -71,6 +71,11 @@ export class GameUI {
     }
     const tile = this.game.tile(pos.q, pos.r);
     if (!tile) return;
+    // The fog keeps its secrets.
+    if (!this.game.isExplored(pos.q, pos.r)) {
+      this.select(null);
+      return;
+    }
     const p = this.game.playerFaction;
 
     // Build placement mode.
@@ -106,9 +111,11 @@ export class GameUI {
 
     // Otherwise select what's on the tile: unit first, then building, then dirt.
     // Clicking the same tile again cycles unit -> building underneath it.
-    if (tile.unit && this.selection?.type === "unit" && this.selection.unit === tile.unit && tile.building) {
+    // Units in the fog don't exist as far as the cursor is concerned.
+    const unitHere = this.game.isVisible(pos.q, pos.r) ? tile.unit : null;
+    if (unitHere && this.selection?.type === "unit" && this.selection.unit === unitHere && tile.building) {
       this.select({ type: "building", building: tile.building });
-    } else if (tile.unit) this.select({ type: "unit", unit: tile.unit });
+    } else if (unitHere) this.select({ type: "unit", unit: unitHere });
     else if (tile.building) this.select({ type: "building", building: tile.building });
     else this.select({ type: "tile", tile });
   }
@@ -120,9 +127,13 @@ export class GameUI {
       return;
     }
     const t = this.game.tile(pos.q, pos.r);
-    if (!t) return;
+    if (!t || !this.game.isExplored(pos.q, pos.r)) {
+      this.tooltipEl.classList.add("hidden");
+      return;
+    }
+    const seen = this.game.isVisible(pos.q, pos.r);
     const bits: string[] = [];
-    if (t.unit) {
+    if (t.unit && seen) {
       const d = UNITS[t.unit.kind];
       bits.push(
         `<div class="t-title" style="color:${FACTIONS[t.unit.faction].cssColor}">${d.name} — ${FACTIONS[t.unit.faction].name}</div>`,
@@ -133,10 +144,10 @@ export class GameUI {
       const d = BUILDINGS[t.building.kind];
       bits.push(
         `<div class="t-title" style="color:${FACTIONS[t.building.faction].cssColor}">${d.name} — ${FACTIONS[t.building.faction].name}</div>`,
-        `<div>HP ${t.building.hp}/${d.hp}</div>`,
+        seen ? `<div>HP ${t.building.hp}/${d.hp}</div>` : `<div class="t-dim">last known position</div>`,
       );
     }
-    bits.push(`<div class="t-dim">${TERRAIN_LABEL[t.terrain]}${t.looted ? " (looted)" : ""}</div>`);
+    bits.push(`<div class="t-dim">${TERRAIN_LABEL[t.terrain]}${t.looted ? " (looted)" : ""}${seen ? "" : " · fogged"}</div>`);
     this.tooltipEl.innerHTML = bits.join("");
     this.tooltipEl.style.left = `${Math.min(e.clientX + 14, window.innerWidth - 260)}px`;
     this.tooltipEl.style.top = `${e.clientY + 14}px`;
@@ -284,10 +295,12 @@ export class GameUI {
     }
     if (this.selection?.type === "unit" && this.selection.unit.faction === p) {
       const u = this.selection.unit;
-      const move = [...this.game.moveRange(u).keys()].map((k) => {
-        const [q, r] = k.split(",").map(Number);
-        return { q, r };
-      });
+      const move = [...this.game.moveRange(u).keys()]
+        .map((k) => {
+          const [q, r] = k.split(",").map(Number);
+          return { q, r };
+        })
+        .filter((c) => this.game.isExplored(c.q, c.r));
       this.view.setHighlights({ move, attack: this.game.attackTargets(u) });
       this.view.setSelection(u);
       return;

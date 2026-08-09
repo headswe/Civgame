@@ -28,6 +28,9 @@ Then open the printed URL (usually http://localhost:5173).
   era: Salvage Age → Chatbot Era → Agentic Era → AGI (Trust Us This Time) →
   **The Singularity** (instant victory at 260▣).
 - **Win** by razing every rival citadel, or by ascending via compute.
+- **Fog of war** — the wasteland starts unknown. Units and buildings project
+  sight (drones and citadels see furthest); explored ground stays on the map as
+  dim memory, but enemy units only exist where you can currently see.
 - Scavenge pre-Collapse **ruins** with drones for +15⚡ lump sums.
 - Build **Fusion Reactors** on geothermal vents for +5⚡ bonus.
 - **Turrets** auto-fire at adjacent enemies. **Slag flows** are impassable.
