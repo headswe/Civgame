@@ -9,10 +9,13 @@ export enum Terrain {
   Geovent = "geovent",
 }
 
+export type RuinKind = "city" | "suburb" | "bunker" | "trench";
+
 export interface Tile {
   q: number;
   r: number;
   terrain: Terrain;
+  ruinKind?: RuinKind; // flavor of pre-Collapse ruin, set when terrain is Ruins
   looted: boolean; // for ruins that have been scavenged
   building: Building | null;
   unit: Unit | null;

@@ -1,8 +1,16 @@
-import { Terrain, type Tile } from "./types";
+import { Terrain, type RuinKind, type Tile } from "./types";
 import { distance, key, neighbors } from "./hex";
 
 export const MAP_COLS = 22;
 export const MAP_ROWS = 16;
+
+function pickRuinKind(rng: () => number): RuinKind {
+  const roll = rng();
+  if (roll < 0.35) return "city";
+  if (roll < 0.65) return "suburb";
+  if (roll < 0.8) return "bunker";
+  return "trench";
+}
 
 /** Simple deterministic-ish value noise built from a seeded PRNG. */
 function makeRng(seed: number) {
@@ -41,6 +49,7 @@ export function generateMap(seed = Date.now()): {
         q,
         r,
         terrain,
+        ruinKind: terrain === Terrain.Ruins ? pickRuinKind(rng) : undefined,
         looted: false,
         building: null,
         unit: null,
@@ -83,7 +92,10 @@ export function generateMap(seed = Date.now()): {
     ring.forEach((n, i) => {
       const t = tiles.get(key(n.q, n.r))!;
       if (t.terrain === Terrain.Slag) t.terrain = Terrain.Wastes;
-      if (i === 0) t.terrain = Terrain.Ruins;
+      if (i === 0) {
+        t.terrain = Terrain.Ruins;
+        t.ruinKind = pickRuinKind(rng);
+      }
     });
   }
 

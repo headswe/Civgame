@@ -196,6 +196,7 @@ export class SceneView {
       mesh.userData.topBase = style.color;
       mesh.userData.sideBase = sideColor;
       mesh.userData.terrain = t.terrain;
+      mesh.userData.ruinKind = t.ruinKind;
       this.terrainGroup.add(mesh);
       this.tileMeshes.set(`${t.q},${t.r}`, mesh);
       this.tileTops.set(`${t.q},${t.r}`, style.height);
@@ -215,19 +216,36 @@ export class SceneView {
    */
   private loadGroundTextures() {
     const loader = new THREE.TextureLoader();
-    for (const terrain of Object.values(Terrain)) {
+    // (name, priority, tile filter). Ruin-variant textures outrank the
+    // generic ruins texture regardless of load order.
+    const sets: { name: string; priority: number; matches: (m: THREE.Mesh) => boolean }[] =
+      Object.values(Terrain).map((terrain) => ({
+        name: terrain as string,
+        priority: 0,
+        matches: (m: THREE.Mesh) => m.userData.terrain === terrain,
+      }));
+    for (const kind of ["city", "suburb", "bunker", "trench"]) {
+      sets.push({
+        name: `ruins_${kind}`,
+        priority: 1,
+        matches: (m: THREE.Mesh) => m.userData.terrain === Terrain.Ruins && m.userData.ruinKind === kind,
+      });
+    }
+    for (const set of sets) {
       loader.load(
-        `textures/ground_${terrain}.png`,
+        `textures/ground_${set.name}.png`,
         (tex) => {
           tex.colorSpace = THREE.SRGBColorSpace;
           for (const mesh of this.tileMeshes.values()) {
-            if (mesh.userData.terrain !== terrain) continue;
+            if (!set.matches(mesh)) continue;
+            if ((mesh.userData.texPriority ?? -1) >= set.priority) continue;
             const mats = mesh.material as THREE.MeshLambertMaterial[];
             mats[1].map = tex;
             mats[1].needsUpdate = true;
             // The texture carries the ground color now; tint from near-white
             // so fog dimming still works on top of it.
             mesh.userData.topBase = 0xffffff;
+            mesh.userData.texPriority = set.priority;
           }
           if (this.lastGame) this.sync(this.lastGame);
         },
@@ -285,6 +303,125 @@ export class SceneView {
     layer(2.35, 0.55, 4.2, 0.45); // high wisps, faster drift
   }
 
+  /**
+   * Pre-Collapse ruins come in four flavors, each assembled from seeded
+   * randomness so every tile of the same kind still looks hand-placed.
+   */
+  private decorateRuin(t: Tile, x: number, z: number, top: number, rnd: () => number) {
+    const lam = (c: number) => new THREE.MeshLambertMaterial({ color: c });
+    const put = (mesh: THREE.Mesh, dx: number, y: number, dz: number, ry = 0): THREE.Mesh => {
+      mesh.position.set(x + dx, top + y, z + dz);
+      mesh.rotation.y = ry;
+      mesh.castShadow = true;
+      this.addDecor(t, mesh);
+      return mesh;
+    };
+
+    switch (t.ruinKind ?? "city") {
+      case "city": {
+        // Dense block of snapped-off towers, some leaning, rebar poking out.
+        const n = 4 + Math.floor(rnd() * 3);
+        for (let i = 0; i < n; i++) {
+          const w = 0.13 + rnd() * 0.15;
+          const h = 0.3 + rnd() * 0.6;
+          const shade = 0x3e4450 + Math.floor(rnd() * 3) * 0x0a0a0c;
+          const a = (i / n) * Math.PI * 2 + rnd() * 0.8;
+          const rad = 0.15 + rnd() * 0.4;
+          const tower = put(new THREE.Mesh(new THREE.BoxGeometry(w, h, w * (0.8 + rnd() * 0.5)), lam(shade)),
+            Math.cos(a) * rad, h / 2, Math.sin(a) * rad, rnd() * Math.PI);
+          tower.rotation.z = (rnd() - 0.5) * 0.14; // subsidence lean
+          if (rnd() < 0.5) {
+            // Collapsed upper floors slumped against the stub.
+            put(new THREE.Mesh(new THREE.BoxGeometry(w * 0.9, 0.08, w), lam(0x333944)),
+              Math.cos(a) * rad + (rnd() - 0.5) * 0.2, 0.04, Math.sin(a) * rad + (rnd() - 0.5) * 0.2, rnd() * Math.PI);
+          }
+        }
+        for (let i = 0; i < 2; i++) {
+          const bar = put(new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.22, 5), lam(0x7a4a30)),
+            (rnd() - 0.5) * 0.7, 0.1, (rnd() - 0.5) * 0.7);
+          bar.rotation.z = (rnd() - 0.5) * 0.9;
+        }
+        break;
+      }
+
+      case "suburb": {
+        // A cul-de-sac of little houses; some still stand, some are just slabs.
+        const lots = 3 + Math.floor(rnd() * 2);
+        for (let i = 0; i < lots; i++) {
+          const a = (i / lots) * Math.PI * 2 + 0.4 + rnd() * 0.5;
+          const rad = 0.3 + rnd() * 0.22;
+          const dx = Math.cos(a) * rad;
+          const dz = Math.sin(a) * rad;
+          const ry = rnd() * Math.PI;
+          if (rnd() < 0.4) {
+            // Burned to the foundation.
+            put(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.03, 0.16), lam(0x4a443c)), dx, 0.015, dz, ry);
+          } else {
+            const wall = [0x8a7a68, 0x7a7568, 0x94806a][Math.floor(rnd() * 3)];
+            put(new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 0.15), lam(wall)), dx, 0.06, dz, ry);
+            const roof = put(new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.09, 4), lam(0x6a4034)), dx, 0.165, dz, ry + Math.PI / 4);
+            if (rnd() < 0.35) roof.rotation.z = 0.5; // roof half slid off
+          }
+        }
+        if (rnd() < 0.6) {
+          // A dead tree for the cul-de-sac's HOA-approved landscaping.
+          const trunk = put(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.035, 0.3, 5), lam(0x4a3828)),
+            (rnd() - 0.5) * 0.3, 0.15, (rnd() - 0.5) * 0.3);
+          trunk.rotation.z = (rnd() - 0.5) * 0.4;
+        }
+        break;
+      }
+
+      case "bunker": {
+        // Hardened emplacement: pad, dome, firing slit, sandbags, antenna.
+        put(new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.46, 0.07, 8), lam(0x6a6a66)), 0, 0.035, 0, rnd());
+        const dome = put(new THREE.Mesh(new THREE.SphereGeometry(0.27, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), lam(0x77776f)), 0, 0.07, 0);
+        void dome;
+        const slitAngle = rnd() * Math.PI * 2;
+        put(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.05, 0.04), lam(0x1a1c1e)),
+          Math.cos(slitAngle) * 0.24, 0.19, Math.sin(slitAngle) * 0.24, -slitAngle);
+        const bags = 6 + Math.floor(rnd() * 3);
+        const arcStart = rnd() * Math.PI * 2;
+        for (let i = 0; i < bags; i++) {
+          const a = arcStart + (i / bags) * Math.PI * 1.3;
+          put(new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.05, 0.06), lam(0x8a7d5e)),
+            Math.cos(a) * 0.52, 0.025 + (i % 2) * 0.04, Math.sin(a) * 0.52, a + rnd() * 0.4);
+        }
+        const mast = put(new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.4, 5), lam(0x555a5e)), 0.12, 0.4, -0.1);
+        mast.rotation.z = (rnd() - 0.5) * 0.2;
+        break;
+      }
+
+      case "trench": {
+        // A zigzag earthwork cutting across the tile.
+        const baseA = rnd() * Math.PI;
+        for (let i = -1; i <= 1; i++) {
+          const segA = baseA + i * 0.7 * (rnd() < 0.5 ? 1 : -1);
+          const cx = Math.cos(baseA) * i * 0.34;
+          const cz = Math.sin(baseA) * i * 0.34;
+          // Dark trench floor with berms on both sides.
+          put(new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.02, 0.14), lam(0x241f1a)), cx, 0.012, cz, -segA);
+          for (const side of [-1, 1]) {
+            const berm = put(new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.07 + rnd() * 0.04, 0.07), lam(0x6a5844)),
+              cx + Math.sin(segA) * 0.11 * side, 0.045, cz + Math.cos(segA) * 0.11 * side, -segA);
+            berm.rotation.z = (rnd() - 0.5) * 0.1;
+          }
+        }
+        // Sandbags and a couple of shoring posts.
+        for (let i = 0; i < 4; i++) {
+          put(new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.045, 0.055), lam(0x857a5c)),
+            (rnd() - 0.5) * 0.8, 0.025, (rnd() - 0.5) * 0.8, rnd() * Math.PI);
+        }
+        for (let i = 0; i < 2; i++) {
+          const post = put(new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.16, 5), lam(0x54402c)),
+            (rnd() - 0.5) * 0.6, 0.08, (rnd() - 0.5) * 0.6);
+          post.rotation.z = (rnd() - 0.5) * 0.5;
+        }
+        break;
+      }
+    }
+  }
+
   private addDecor(t: Tile, mesh: THREE.Mesh) {
     mesh.userData.baseColor = ((mesh.material as THREE.MeshLambertMaterial).color as THREE.Color).getHex();
     this.terrainGroup.add(mesh);
@@ -297,18 +434,7 @@ export class SceneView {
   private decorateTile(t: Tile, x: number, z: number, top: number) {
     const rnd = mulberry(t.q * 73856093 ^ t.r * 19349663);
     if (t.terrain === Terrain.Ruins) {
-      // Broken pre-Collapse stubs.
-      for (let i = 0; i < 3; i++) {
-        const h = 0.25 + rnd() * 0.55;
-        const box = new THREE.Mesh(
-          new THREE.BoxGeometry(0.16 + rnd() * 0.14, h, 0.16 + rnd() * 0.14),
-          new THREE.MeshLambertMaterial({ color: 0x4a505c }),
-        );
-        box.position.set(x + (rnd() - 0.5) * 0.9, top + h / 2, z + (rnd() - 0.5) * 0.9);
-        box.rotation.y = rnd() * Math.PI;
-        box.castShadow = true;
-        this.addDecor(t, box);
-      }
+      this.decorateRuin(t, x, z, top, rnd);
     } else if (t.terrain === Terrain.Slag) {
       const glow = new THREE.Mesh(
         new THREE.CylinderGeometry(TILE_R * 0.82, TILE_R * 0.82, 0.02, 6),

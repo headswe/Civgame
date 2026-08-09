@@ -33,6 +33,10 @@ const TERRAINS = {
   ruins: "Shattered pre-war concrete and asphalt rubble, gray-blue broken slabs, faint rebar stains, dusty.",
   slag: "Cooled black slag crust with thin glowing orange cracks, like a dormant lava field.",
   geovent: "Scorched dark basalt around mineral-crusted fumarole ground, faint teal mineral deposits.",
+  ruins_city: "Cracked asphalt streets and collapsed concrete floor plans seen from directly above, faded lane markings, gray rubble drifts.",
+  ruins_suburb: "Ruined suburban ground from above: cracked driveways, dead brown lawns, fragments of cul-de-sac asphalt, dusty sidewalks.",
+  ruins_bunker: "Scorched reinforced concrete military pad from above, blast scoring, oil stains, expansion joints, dusty.",
+  ruins_trench: "Churned muddy battlefield earth from above with scattered duckboard plank fragments, dark wet soil, boot and track marks.",
 };
 
 const wanted = process.argv.slice(2);

@@ -20,6 +20,20 @@ const TERRAIN_LABEL: Record<Terrain, string> = {
   [Terrain.Geovent]: "Geothermal Vent — reactors built here get +5⚡",
 };
 
+const RUIN_LABEL: Record<string, string> = {
+  city: "shattered city blocks",
+  suburb: "a dead suburb, HOA disbanded",
+  bunker: "an old military bunker",
+  trench: "abandoned trench lines",
+};
+
+function terrainLabel(t: { terrain: Terrain; ruinKind?: string }): string {
+  if (t.terrain === Terrain.Ruins && t.ruinKind) {
+    return `Pre-Collapse Ruins (${RUIN_LABEL[t.ruinKind]}) — +1 defense, scavengeable`;
+  }
+  return TERRAIN_LABEL[t.terrain];
+}
+
 export class GameUI {
   private selection: Selection = null;
   private buildMode: BuildingKind | null = null;
@@ -155,7 +169,7 @@ export class GameUI {
         seen ? `<div>HP ${t.building.hp}/${d.hp}</div>` : `<div class="t-dim">last known position</div>`,
       );
     }
-    bits.push(`<div class="t-dim">${TERRAIN_LABEL[t.terrain]}${t.looted ? " (looted)" : ""}${seen ? "" : " · fogged"}</div>`);
+    bits.push(`<div class="t-dim">${terrainLabel(t)}${t.looted ? " (looted)" : ""}${seen ? "" : " · fogged"}</div>`);
     this.tooltipEl.innerHTML = bits.join("");
     this.tooltipEl.style.left = `${Math.min(e.clientX + 14, window.innerWidth - 260)}px`;
     this.tooltipEl.style.top = `${e.clientY + 14}px`;
@@ -291,7 +305,7 @@ export class GameUI {
 
     const t = this.selection.tile;
     el.innerHTML = `<h3>TERRAIN</h3>
-      <div class="sub">${TERRAIN_LABEL[t.terrain]}${t.looted ? " (looted)" : ""}</div>`;
+      <div class="sub">${terrainLabel(t)}${t.looted ? " (looted)" : ""}</div>`;
   }
 
   private renderHighlights() {
