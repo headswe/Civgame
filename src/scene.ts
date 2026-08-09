@@ -5,9 +5,9 @@ import { toWorld } from "./hex";
 import type { Game } from "./game";
 
 // Hex circumradius. At exactly 1 the flats of neighboring hexes touch
-// (centers are √3 apart, apothem is √3/2), fusing same-height tiles into
-// continuous ground.
-const TILE_R = 1.0;
+// (centers are √3 apart, apothem is √3/2); a hair under keeps a hairline
+// seam so hexes still read as tiles.
+const TILE_R = 0.996;
 
 // Uniform ground level everywhere except mountains (and slag, which sinks a
 // little, like the melted river it is) — so the floor reads as one continuous
@@ -21,8 +21,36 @@ const TERRAIN_STYLE: Record<Terrain, { color: number; height: number }> = {
   [Terrain.Geovent]: { color: 0x6b5a48, height: 0.32 },
 };
 
-/** World units of ground covered by one texture repeat (~2.5 hexes). */
-const UV_SCALE = 0.23;
+/** World units of ground covered by one texture repeat (~1.2 hexes: fine grain). */
+const UV_SCALE = 0.48;
+
+/**
+ * Textures act as a subtle detail layer under the game's flat palette: the
+ * material tint carries the terrain color (boosted, since the multiply with
+ * mid-gray texels darkens), keeping the crisp stylized look.
+ */
+function texTint(terrain: Terrain, mult = 1): THREE.Color {
+  // Softened textures average ~mid-gray, so 2x restores exact palette luminance.
+  return new THREE.Color(TERRAIN_STYLE[terrain].color).multiplyScalar(2.0 * mult);
+}
+
+/**
+ * Blend a loaded texture toward neutral gray so it becomes a low-contrast
+ * detail layer: the palette tint then dominates, keeping the stylized look.
+ */
+function softenTexture(tex: THREE.Texture): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = c.height = 512;
+  const g = c.getContext("2d")!;
+  g.drawImage(tex.image as CanvasImageSource, 0, 0, 512, 512);
+  g.fillStyle = "rgba(128,128,128,0.62)";
+  g.fillRect(0, 0, 512, 512);
+  const out = new THREE.CanvasTexture(c);
+  out.colorSpace = THREE.SRGBColorSpace;
+  out.wrapS = THREE.RepeatWrapping;
+  out.wrapT = THREE.RepeatWrapping;
+  return out;
+}
 
 export class SceneView {
   renderer: THREE.WebGLRenderer;
@@ -212,8 +240,8 @@ export class SceneView {
       mesh.receiveShadow = true;
       mesh.castShadow = t.terrain === Terrain.Highlands;
       mesh.userData.tile = { q: t.q, r: t.r };
-      mesh.userData.topBase = style.color;
-      mesh.userData.sideBase = sideColor;
+      mesh.userData.topBase = new THREE.Color(style.color);
+      mesh.userData.sideBase = new THREE.Color(sideColor);
       mesh.userData.terrain = t.terrain;
       mesh.userData.ruinKind = t.ruinKind;
       this.terrainGroup.add(mesh);
@@ -254,18 +282,15 @@ export class SceneView {
       loader.load(
         `textures/ground_${set.name}.png`,
         (tex) => {
-          tex.colorSpace = THREE.SRGBColorSpace;
-          tex.wrapS = THREE.RepeatWrapping;
-          tex.wrapT = THREE.RepeatWrapping;
+          const soft = softenTexture(tex);
           for (const mesh of this.tileMeshes.values()) {
             if (!set.matches(mesh)) continue;
             if ((mesh.userData.texPriority ?? -1) >= set.priority) continue;
             const mats = mesh.material as THREE.MeshLambertMaterial[];
-            mats[1].map = tex;
+            mats[1].map = soft;
             mats[1].needsUpdate = true;
-            // The texture carries the ground color now; tint from near-white
-            // so fog dimming still works on top of it.
-            mesh.userData.topBase = 0xffffff;
+            // Tint through the palette so the texture stays a detail layer.
+            (mesh.userData.topBase as THREE.Color).copy(texTint(mesh.userData.terrain as Terrain));
             mesh.userData.texPriority = set.priority;
           }
           if (this.lastGame) this.sync(this.lastGame);
@@ -476,27 +501,20 @@ export class SceneView {
       this.addDecor(t, vent);
       this.animated.push({ obj: vent, base: top + 0.25, phase: rnd() * 6, amp: 0.08 });
     } else if (t.terrain === Terrain.Highlands) {
-      // Rolling hills: a couple of rounded earthen mounds and some scree.
-      const mounds = 2 + Math.floor(rnd() * 2);
-      for (let i = 0; i < mounds; i++) {
-        const r = i === 0 ? 0.5 + rnd() * 0.16 : 0.24 + rnd() * 0.18;
-        const mound = new THREE.Mesh(
-          new THREE.SphereGeometry(r, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2),
-          new THREE.MeshLambertMaterial({ color: [0x7d6b52, 0x74644d, 0x857358][Math.floor(rnd() * 3)] }),
+      // Raised hill country: weathered rock outcrops in the ground's own
+      // tones, half-sunk so they grow out of the tile instead of sitting on it.
+      const n = 2 + Math.floor(rnd() * 2);
+      for (let i = 0; i < n; i++) {
+        const r = i === 0 ? 0.22 + rnd() * 0.12 : 0.12 + rnd() * 0.1;
+        const rock = new THREE.Mesh(
+          new THREE.DodecahedronGeometry(r),
+          new THREE.MeshLambertMaterial({ color: [0x6f604a, 0x655741, 0x78684f][Math.floor(rnd() * 3)] }),
         );
         const a = rnd() * Math.PI * 2;
-        const rad = i === 0 ? rnd() * 0.2 : 0.3 + rnd() * 0.3;
-        mound.position.set(x + Math.cos(a) * rad, top, z + Math.sin(a) * rad);
-        mound.scale.y = 0.4 + rnd() * 0.18;
-        mound.castShadow = true;
-        this.addDecor(t, mound);
-      }
-      if (rnd() < 0.7) {
-        const rock = new THREE.Mesh(
-          new THREE.DodecahedronGeometry(0.1 + rnd() * 0.08),
-          new THREE.MeshLambertMaterial({ color: 0x6a5a45 }),
-        );
-        rock.position.set(x + (rnd() - 0.5) * 0.9, top + 0.07, z + (rnd() - 0.5) * 0.9);
+        const rad = i === 0 ? rnd() * 0.25 : 0.3 + rnd() * 0.3;
+        rock.position.set(x + Math.cos(a) * rad, top + r * 0.45, z + Math.sin(a) * rad);
+        rock.scale.y = 1.1 + rnd() * 0.5;
+        rock.rotation.set(rnd() * 0.4, rnd() * Math.PI, rnd() * 0.4);
         rock.castShadow = true;
         this.addDecor(t, rock);
       }
@@ -520,18 +538,19 @@ export class SceneView {
       const k = `${t.q},${t.r}`;
       const mesh = this.tileMeshes.get(k);
       if (!mesh) continue;
+      const mats = mesh.material as THREE.MeshLambertMaterial[];
       // Looted ruins go dim permanently, on top of fog.
       if (t.terrain === Terrain.Ruins) {
-        const textured = !!(mesh.material as THREE.MeshLambertMaterial[])[1].map;
-        mesh.userData.topBase = t.looted ? (textured ? 0x6a6a6a : 0x3f434c) : (textured ? 0xffffff : 0x5e6470);
+        const base = mesh.userData.topBase as THREE.Color;
+        if (mats[1].map) base.copy(texTint(Terrain.Ruins, t.looted ? 0.55 : 1));
+        else base.set(t.looted ? 0x3f434c : 0x5e6470);
       }
 
       const explored = game.isExplored(t.q, t.r);
       const seen = game.isVisible(t.q, t.r);
       const factor = seen ? 1 : explored ? EXPLORED_DIM : UNEXPLORED_DIM;
-      const mats = mesh.material as THREE.MeshLambertMaterial[];
-      mats[1].color.set(mesh.userData.topBase as number).multiplyScalar(factor);
-      mats[0].color.set(mesh.userData.sideBase as number).multiplyScalar(factor);
+      mats[1].color.copy(mesh.userData.topBase as THREE.Color).multiplyScalar(factor);
+      mats[0].color.copy(mesh.userData.sideBase as THREE.Color).multiplyScalar(factor);
       for (const d of this.tileDecor.get(k) ?? []) {
         d.visible = explored;
         (d.material as THREE.MeshLambertMaterial).color.set(d.userData.baseColor as number).multiplyScalar(factor);
