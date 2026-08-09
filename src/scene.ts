@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { Terrain, type Building, type Tile, type Unit } from "./types";
 import { FACTIONS, UNITS } from "./content";
-import { toWorld } from "./hex";
+import { neighbors, toWorld } from "./hex";
 import type { Game } from "./game";
 
 // Hex circumradius. At exactly 1 the flats of neighboring hexes touch
@@ -15,7 +15,7 @@ const TILE_R = 0.996;
 const TERRAIN_STYLE: Record<Terrain, { color: number; height: number }> = {
   [Terrain.Wastes]: { color: 0x8a7355, height: 0.32 },
   [Terrain.Ashdunes]: { color: 0x6e6a63, height: 0.32 },
-  [Terrain.Highlands]: { color: 0x7d6b52, height: 0.58 },
+  [Terrain.Highlands]: { color: 0x7d6b52, height: 0.32 },
   [Terrain.Ruins]: { color: 0x5e6470, height: 0.32 },
   [Terrain.Slag]: { color: 0x2b1812, height: 0.24 },
   [Terrain.Geovent]: { color: 0x6b5a48, height: 0.32 },
@@ -38,12 +38,12 @@ function texTint(terrain: Terrain, mult = 1): THREE.Color {
  * Blend a loaded texture toward neutral gray so it becomes a low-contrast
  * detail layer: the palette tint then dominates, keeping the stylized look.
  */
-function softenTexture(tex: THREE.Texture): THREE.CanvasTexture {
+function softenTexture(tex: THREE.Texture, overlayAlpha = 0.62): THREE.CanvasTexture {
   const c = document.createElement("canvas");
   c.width = c.height = 512;
   const g = c.getContext("2d")!;
   g.drawImage(tex.image as CanvasImageSource, 0, 0, 512, 512);
-  g.fillStyle = "rgba(128,128,128,0.62)";
+  g.fillStyle = `rgba(128,128,128,${overlayAlpha})`;
   g.fillRect(0, 0, 512, 512);
   const out = new THREE.CanvasTexture(c);
   out.colorSpace = THREE.SRGBColorSpace;
@@ -69,6 +69,7 @@ export class SceneView {
   private static readonly FIELD_RES = 128;
   private tileDecor = new Map<string, THREE.Mesh[]>();
   private tileTops = new Map<string, number>();
+  private hillDomes: THREE.Mesh[] = [];
   private animated: { obj: THREE.Object3D; base: number; phase: number; amp: number }[] = [];
   private selectionRing: THREE.Mesh;
   private raycaster = new THREE.Raycaster();
@@ -210,43 +211,71 @@ export class SceneView {
     this.terrainGroup.clear();
     this.tileMeshes.clear();
     this.tileDecor.clear();
+    this.hillDomes = [];
+    const blend = new THREE.Color();
+    const tmp = new THREE.Color();
     for (const t of game.tiles.values()) {
       const style = TERRAIN_STYLE[t.terrain];
       const geo = new THREE.CylinderGeometry(TILE_R, TILE_R, style.height, 6);
       const { x, z } = toWorld(t);
-      // World-space UVs on the cap: the ground texture flows continuously
-      // across neighboring tiles instead of restarting at every hex border.
+      const near = [t, ...neighbors(t).map((n) => game.tiles.get(`${n.q},${n.r}`)).filter((n): n is Tile => !!n)];
+      // Cap vertices get world-space UVs (textures flow across tile borders)
+      // and vertex colors blended from the tiles sharing each corner, so
+      // terrain hues gradient into each other instead of hard-switching.
       {
         const pos = geo.attributes.position;
         const nrm = geo.attributes.normal;
         const uv = geo.attributes.uv;
+        const colors = new Float32Array(pos.count * 3).fill(1);
         for (let i = 0; i < pos.count; i++) {
           if (nrm.getY(i) > 0.9) {
-            uv.setXY(i, (x + pos.getX(i)) * UV_SCALE, (z + pos.getZ(i)) * UV_SCALE);
+            const wx = x + pos.getX(i);
+            const wz = z + pos.getZ(i);
+            uv.setXY(i, wx * UV_SCALE, wz * UV_SCALE);
+            blend.setRGB(0, 0, 0);
+            let w = 0;
+            for (const nt of near) {
+              const c = toWorld(nt);
+              // A hex corner sits ~1.0 from the centers of all 3 tiles sharing it.
+              if (Math.hypot(wx - c.x, wz - c.z) < 1.25) {
+                tmp.set(TERRAIN_STYLE[nt.terrain].color);
+                blend.add(tmp);
+                w++;
+              }
+            }
+            if (w === 0) {
+              blend.set(style.color);
+              w = 1;
+            }
+            colors[i * 3] = blend.r / w;
+            colors[i * 3 + 1] = blend.g / w;
+            colors[i * 3 + 2] = blend.b / w;
           }
         }
+        geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
         uv.needsUpdate = true;
       }
-      // Material array: [side, top cap, bottom]. The cap gets a ground
-      // texture when one exists; the side stays a darker cliff color.
+      // Material array: [side, top cap, bottom]. The cap's hue comes from the
+      // blended vertex colors; its material color is just texture-luminance
+      // boost x fog factor. The side stays a darker cliff color.
       const sideColor = new THREE.Color(style.color).multiplyScalar(0.62).getHex();
       const side = new THREE.MeshLambertMaterial({ color: sideColor });
-      const top = new THREE.MeshLambertMaterial({ color: style.color });
+      const top = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
       const mesh = new THREE.Mesh(geo, [side, top, side]);
       // Default cylinder orientation puts a vertex at +z and flats toward all
       // six neighbor directions of this layout — exact tessellation, no extra
       // rotation. (Rotating by 30° points corners at neighbors and opens gaps.)
       mesh.position.set(x, style.height / 2, z);
       mesh.receiveShadow = true;
-      mesh.castShadow = t.terrain === Terrain.Highlands;
       mesh.userData.tile = { q: t.q, r: t.r };
-      mesh.userData.topBase = new THREE.Color(style.color);
+      mesh.userData.topBase = new THREE.Color(0xffffff);
       mesh.userData.sideBase = new THREE.Color(sideColor);
       mesh.userData.terrain = t.terrain;
       mesh.userData.ruinKind = t.ruinKind;
       this.terrainGroup.add(mesh);
       this.tileMeshes.set(`${t.q},${t.r}`, mesh);
-      this.tileTops.set(`${t.q},${t.r}`, style.height);
+      // Highlands rise into a dome, so their "ground" is the crest.
+      this.tileTops.set(`${t.q},${t.r}`, t.terrain === Terrain.Highlands ? style.height + 0.38 : style.height);
 
       this.decorateTile(t, x, z, style.height);
 
@@ -282,16 +311,27 @@ export class SceneView {
       loader.load(
         `textures/ground_${set.name}.png`,
         (tex) => {
-          const soft = softenTexture(tex);
+          // Dunes keep more of their ripple pattern; everything else stays subtle.
+          const soft = softenTexture(tex, set.name === (Terrain.Ashdunes as string) ? 0.42 : 0.62);
           for (const mesh of this.tileMeshes.values()) {
             if (!set.matches(mesh)) continue;
             if ((mesh.userData.texPriority ?? -1) >= set.priority) continue;
             const mats = mesh.material as THREE.MeshLambertMaterial[];
             mats[1].map = soft;
             mats[1].needsUpdate = true;
-            // Tint through the palette so the texture stays a detail layer.
-            (mesh.userData.topBase as THREE.Color).copy(texTint(mesh.userData.terrain as Terrain));
+            // Vertex colors carry the hue; the material color only compensates
+            // for the mid-gray texture luminance (and fog, per sync).
+            (mesh.userData.topBase as THREE.Color).setScalar(2.0);
             mesh.userData.texPriority = set.priority;
+          }
+          if (set.name === (Terrain.Highlands as string)) {
+            // Hill domes wear the same ground texture as their tile.
+            for (const dome of this.hillDomes) {
+              const m = dome.material as THREE.MeshLambertMaterial;
+              m.map = soft;
+              m.needsUpdate = true;
+              (dome.userData.baseColor as THREE.Color).copy(texTint(Terrain.Highlands));
+            }
           }
           if (this.lastGame) this.sync(this.lastGame);
         },
@@ -472,7 +512,7 @@ export class SceneView {
   }
 
   private addDecor(t: Tile, mesh: THREE.Mesh) {
-    mesh.userData.baseColor = ((mesh.material as THREE.MeshLambertMaterial).color as THREE.Color).getHex();
+    mesh.userData.baseColor = (mesh.material as THREE.MeshLambertMaterial).color.clone();
     this.terrainGroup.add(mesh);
     const k = `${t.q},${t.r}`;
     const list = this.tileDecor.get(k) ?? [];
@@ -501,22 +541,46 @@ export class SceneView {
       this.addDecor(t, vent);
       this.animated.push({ obj: vent, base: top + 0.25, phase: rnd() * 6, amp: 0.08 });
     } else if (t.terrain === Terrain.Highlands) {
-      // Raised hill country: weathered rock outcrops in the ground's own
-      // tones, half-sunk so they grow out of the tile instead of sitting on it.
-      const n = 2 + Math.floor(rnd() * 2);
-      for (let i = 0; i < n; i++) {
-        const r = i === 0 ? 0.22 + rnd() * 0.12 : 0.12 + rnd() * 0.1;
+      // The tile IS the hill: one broad smooth dome in the ground's own color
+      // rising from the shared ground level, with a rock or two on the slope.
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(0.86, 14, 9, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshLambertMaterial({ color: TERRAIN_STYLE[Terrain.Highlands].color }),
+      );
+      dome.position.set(x + (rnd() - 0.5) * 0.1, top - 0.01, z + (rnd() - 0.5) * 0.1);
+      dome.scale.set(1 + (rnd() - 0.5) * 0.12, 0.46 + rnd() * 0.08, 1 + (rnd() - 0.5) * 0.12);
+      dome.rotation.y = rnd() * Math.PI;
+      dome.castShadow = true;
+      this.addDecor(t, dome);
+      this.hillDomes.push(dome);
+      if (rnd() < 0.7) {
+        const r = 0.08 + rnd() * 0.07;
         const rock = new THREE.Mesh(
           new THREE.DodecahedronGeometry(r),
-          new THREE.MeshLambertMaterial({ color: [0x6f604a, 0x655741, 0x78684f][Math.floor(rnd() * 3)] }),
+          new THREE.MeshLambertMaterial({ color: 0x655741 }),
         );
         const a = rnd() * Math.PI * 2;
-        const rad = i === 0 ? rnd() * 0.25 : 0.3 + rnd() * 0.3;
-        rock.position.set(x + Math.cos(a) * rad, top + r * 0.45, z + Math.sin(a) * rad);
-        rock.scale.y = 1.1 + rnd() * 0.5;
-        rock.rotation.set(rnd() * 0.4, rnd() * Math.PI, rnd() * 0.4);
+        rock.position.set(x + Math.cos(a) * 0.45, top + 0.18, z + Math.sin(a) * 0.45);
+        rock.rotation.set(rnd(), rnd() * Math.PI, rnd());
         rock.castShadow = true;
         this.addDecor(t, rock);
+      }
+    } else if (t.terrain === Terrain.Ashdunes) {
+      // Barchan crescents: one or two low, sharp dune berms facing the shared
+      // wind, barely lighter than the ground. The ripple texture does the rest.
+      const wind = 0.65 + (rnd() - 0.5) * 0.3;
+      const crescents = rnd() < 0.65 ? 1 + Math.floor(rnd() * 2) : 0;
+      for (let i = 0; i < crescents; i++) {
+        const ridge = new THREE.Mesh(
+          new THREE.TorusGeometry(0.26 + rnd() * 0.1, 0.05, 6, 12, Math.PI * (0.8 + rnd() * 0.25)),
+          new THREE.MeshLambertMaterial({ color: rnd() < 0.5 ? 0x767068 : 0x6a665f }),
+        );
+        ridge.rotation.x = -Math.PI / 2;
+        ridge.rotation.z = -wind + i * 2.6 + (rnd() - 0.5) * 0.4;
+        ridge.position.set(x + (rnd() - 0.5) * 0.7, top + 0.005, z + (rnd() - 0.5) * 0.7);
+        // After the flat-lay rotation, local z points up: flatten the tube.
+        ridge.scale.z = 0.45;
+        this.addDecor(t, ridge);
       }
     }
   }
@@ -542,8 +606,7 @@ export class SceneView {
       // Looted ruins go dim permanently, on top of fog.
       if (t.terrain === Terrain.Ruins) {
         const base = mesh.userData.topBase as THREE.Color;
-        if (mats[1].map) base.copy(texTint(Terrain.Ruins, t.looted ? 0.55 : 1));
-        else base.set(t.looted ? 0x3f434c : 0x5e6470);
+        base.setScalar((mats[1].map ? 2.0 : 1.0) * (t.looted ? 0.55 : 1));
       }
 
       const explored = game.isExplored(t.q, t.r);
@@ -553,7 +616,7 @@ export class SceneView {
       mats[0].color.copy(mesh.userData.sideBase as THREE.Color).multiplyScalar(factor);
       for (const d of this.tileDecor.get(k) ?? []) {
         d.visible = explored;
-        (d.material as THREE.MeshLambertMaterial).color.set(d.userData.baseColor as number).multiplyScalar(factor);
+        (d.material as THREE.MeshLambertMaterial).color.copy(d.userData.baseColor as THREE.Color).multiplyScalar(factor);
       }
     }
     this.updateFogField(game);
