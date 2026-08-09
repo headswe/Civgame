@@ -4,6 +4,7 @@ import { key } from "./hex";
 import type { Game, LogKind } from "./game";
 import { runAiTurn } from "./ai";
 import type { SceneView } from "./scene";
+import { sfx } from "./sfx";
 
 type Selection =
   | { type: "unit"; unit: Unit }
@@ -51,6 +52,15 @@ export class GameUI {
     private onGameOver: () => void,
   ) {
     game.log = (msg, kind) => this.pushLog(msg, kind);
+    game.onCombat = (e) => {
+      if (!this.game.isVisible(e.q, e.r)) return;
+      this.view.spawnBurst(e.q, e.r);
+      this.damagePopup(e.q, e.r, e.dmg, e.kill);
+      sfx.play(e.kill ? "kill" : "hit");
+    };
+    game.onEra = (faction) => {
+      if (faction === this.game.playerFaction) sfx.play("era");
+    };
 
     this.topbar.classList.remove("hidden");
     this.sidepanel.classList.remove("hidden");
@@ -66,6 +76,10 @@ export class GameUI {
       if (e.key === "Escape") {
         this.buildMode = null;
         this.select(null);
+      }
+      if (e.key === "m" || e.key === "M") {
+        const muted = sfx.toggleMute();
+        this.pushLog(`Advisor: audio ${muted ? "muted" : "restored"}. ${muted ? "The wasteland falls silent." : "The wasteland hums again."}`);
       }
     });
 
@@ -95,6 +109,7 @@ export class GameUI {
     // Build placement mode.
     if (this.buildMode) {
       if (this.game.tryBuild(p, this.buildMode, pos.q, pos.r)) {
+        sfx.play("build");
         this.buildMode = null;
         this.select(null);
         return;
@@ -117,8 +132,12 @@ export class GameUI {
         return;
       }
       if (this.game.moveRange(u).has(key(pos.q, pos.r))) {
+        const fromQ = u.q;
+        const fromR = u.r;
         this.game.moveUnit(u, pos.q, pos.r);
         this.select({ type: "unit", unit: u });
+        this.view.animateUnitMove(u.id, fromQ, fromR);
+        sfx.play("move");
         return;
       }
     }
@@ -127,6 +146,7 @@ export class GameUI {
     // Clicking the same tile again cycles unit -> building underneath it.
     // Units in the fog don't exist as far as the cursor is concerned.
     const unitHere = this.game.isVisible(pos.q, pos.r) ? tile.unit : null;
+    if (unitHere || tile.building) sfx.play("select");
     if (unitHere && this.selection?.type === "unit" && this.selection.unit === unitHere && tile.building) {
       this.select({ type: "building", building: tile.building });
     } else if (unitHere) this.select({ type: "unit", unit: unitHere });
@@ -136,6 +156,7 @@ export class GameUI {
 
   private onHover(e: MouseEvent) {
     const pos = this.view.pickTile(e.clientX, e.clientY);
+    this.view.setHover(pos && this.game.isExplored(pos.q, pos.r) ? pos : null);
     if (!pos) {
       this.tooltipEl.classList.add("hidden");
       return;
@@ -197,11 +218,15 @@ export class GameUI {
     const tier = this.game.tierOf(p);
     const nextTier = TIERS[tier + 1];
     const rivals = this.game.factions.filter((x, i) => x.alive && i !== p).length;
+    const progress = nextTier
+      ? Math.min(100, Math.round(((f.compute - TIERS[tier].compute) / (nextTier.compute - TIERS[tier].compute)) * 100))
+      : 100;
     this.topbar.innerHTML = `
       <span class="faction-chip" style="background:${f.def.cssColor}">${f.def.name}</span>
       <span class="stat power">⚡ <b>${f.power}</b> <span class="${income < 0 ? "neg" : ""}">(${income >= 0 ? "+" : ""}${income}/t)</span></span>
       <span class="stat compute">▣ <b>${f.compute}</b> (+${this.game.computeIncome(p)}/t)</span>
-      <span class="tier">era: <b>${TIERS[tier].name}</b>${nextTier ? ` → ${nextTier.name} at ${nextTier.compute}▣` : ""}</span>
+      <span class="tier">era: <b>${TIERS[tier].name}</b>${nextTier ? ` → ${nextTier.name}` : ""}</span>
+      <span class="erabar" title="${nextTier ? `${f.compute}/${nextTier.compute}▣ to ${nextTier.name}` : "ascension complete"}"><i style="width:${progress}%"></i></span>
       <span class="spacer"></span>
       <span class="turn">rivals: ${rivals} · turn ${this.game.turn}</span>`;
   }
@@ -247,6 +272,7 @@ export class GameUI {
         btn.innerHTML = `SCAVENGE RUINS <span class="cost">+15⚡</span><span class="desc">Strip the old world for parts. Ends this drone's turn.</span>`;
         btn.onclick = () => {
           this.game.scavenge(u);
+          sfx.play("scavenge");
           this.refresh();
         };
         el.appendChild(btn);
@@ -276,7 +302,7 @@ export class GameUI {
           btn.innerHTML = `${opt.def.name} <span class="cost">${opt.def.cost}⚡</span>
             <span class="desc">ATK ${opt.def.attack} · HP ${opt.def.hp} · move ${opt.def.move} · upkeep ${opt.def.upkeep}⚡${opt.why ? ` — ${opt.why}` : ""}</span>`;
           btn.onclick = () => {
-            this.game.tryProduce(p, opt.def.kind, b);
+            if (this.game.tryProduce(p, opt.def.kind, b)) sfx.play("produce");
             this.refresh();
           };
           el.appendChild(btn);
@@ -337,6 +363,17 @@ export class GameUI {
     );
   }
 
+  private damagePopup(q: number, r: number, dmg: number, kill: boolean) {
+    const px = this.view.toScreen(q, r);
+    const div = document.createElement("div");
+    div.className = `dmg-pop${kill ? " kill" : ""}`;
+    div.textContent = kill ? `💥 ${dmg}` : `-${dmg}`;
+    div.style.left = `${px.x}px`;
+    div.style.top = `${px.y - 40}px`;
+    document.getElementById("app")!.appendChild(div);
+    setTimeout(() => div.remove(), 950);
+  }
+
   private pushLog(msg: string, kind: LogKind = "info") {
     const div = document.createElement("div");
     div.className = `entry ${kind}`;
@@ -350,6 +387,7 @@ export class GameUI {
   private endTurn() {
     if (this.busy || this.game.result) return;
     this.busy = true;
+    sfx.play("endturn");
     this.endturnEl.classList.add("waiting");
     this.endturnEl.textContent = "THE TECHNO-KINGS MOVE…";
     this.select(null);

@@ -27,6 +27,14 @@ export interface GameResult {
   type: "conquest" | "singularity";
 }
 
+/** Fired for every point of damage dealt, so the UI can splash it. */
+export interface CombatEvent {
+  q: number;
+  r: number;
+  dmg: number;
+  kill: boolean;
+}
+
 export class Game {
   tiles: Map<string, Tile>;
   factions: FactionState[];
@@ -36,6 +44,8 @@ export class Game {
   playerFaction = 0;
   result: GameResult | null = null;
   log: LogFn = () => {};
+  onCombat: (e: CombatEvent) => void = () => {};
+  onEra: (faction: number, tier: number) => void = () => {};
 
   /** Fog of war, player's-eye view. The AI techno-kings cheat; of course they do. */
   explored = new Set<string>();
@@ -342,6 +352,7 @@ export class Game {
       const dmg = Math.max(1, atk - this.terrainDefense(t));
       target.hp -= dmg;
       this.combatLog(u, `hits ${UNITS[target.kind].name} for ${dmg}`);
+      this.onCombat({ q, r, dmg, kill: target.hp <= 0 });
       if (target.hp <= 0) {
         this.killUnit(target);
         this.combatLog(u, `destroys the ${UNITS[target.kind].name}`);
@@ -350,6 +361,7 @@ export class Game {
         const counter = Math.max(0, UNITS[target.kind].attack - this.terrainDefense(this.tile(u.q, u.r)!));
         if (counter > 0) {
           u.hp -= counter;
+          this.onCombat({ q: u.q, r: u.r, dmg: counter, kill: u.hp <= 0 });
           if (u.hp <= 0) {
             this.killUnit(u);
             this.combatLog(target, `destroys the attacking ${UNITS[u.kind].name}`);
@@ -364,6 +376,7 @@ export class Game {
       const dmg = Math.max(1, atk);
       b.hp -= dmg;
       this.combatLog(u, `hits ${BUILDINGS[b.kind].name} for ${dmg}`);
+      this.onCombat({ q, r, dmg, kill: b.hp <= 0 });
       if (b.hp <= 0) this.destroyBuilding(b);
       return true;
     }
@@ -428,6 +441,7 @@ export class Game {
       const dmg = Math.max(1, def.attack - this.terrainDefense(t));
       victim.hp -= dmg;
       this.log(`${this.factions[faction].def.name} turret zaps ${UNITS[victim.kind].name} for ${dmg}.`, "combat");
+      this.onCombat({ q: t.q, r: t.r, dmg, kill: victim.hp <= 0 });
       if (victim.hp <= 0) this.killUnit(victim);
     }
   }
@@ -462,6 +476,7 @@ export class Game {
         const tn = TIERS[newTier].name;
         this.log(`${fs.def.name} enters ${tn.startsWith("The ") ? tn : `the ${tn}`}. ${TIERS[newTier].blurb}`, "quote");
         if (fs.isPlayer) this.log(pick(ADVISOR.newTier), "quote");
+        this.onEra(f, newTier);
       }
       if (newTier >= SINGULARITY_TIER && !this.result) {
         this.result = { winner: f, type: "singularity" };

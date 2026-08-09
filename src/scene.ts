@@ -65,6 +65,9 @@ export class SceneView {
   private tileDecor = new Map<string, THREE.Mesh[]>();
   private tileTops = new Map<string, number>();
   private animated: { obj: THREE.Object3D; base: number; phase: number; amp: number }[] = [];
+  private tweens: { obj: THREE.Object3D; from: THREE.Vector3; to: THREE.Vector3; start: number; dur: number }[] = [];
+  private bursts: { obj: THREE.Mesh; start: number }[] = [];
+  private hoverMesh: THREE.Mesh;
   private selectionRing: THREE.Mesh;
   private raycaster = new THREE.Raycaster();
   private pointer = new THREE.Vector2();
@@ -121,6 +124,13 @@ export class SceneView {
     );
     this.selectionRing.visible = false;
     this.scene.add(this.selectionRing);
+
+    this.hoverMesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(TILE_R * 0.97, TILE_R * 0.97, 0.02, 6),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.1, depthWrite: false }),
+    );
+    this.hoverMesh.visible = false;
+    this.scene.add(this.hoverMesh);
 
     this.setupControls();
     this.renderer.setAnimationLoop(() => this.frame());
@@ -1140,6 +1150,7 @@ export class SceneView {
     const y = this.groundY(u.q, u.r);
     g.position.set(x, y, z);
     g.userData.tile = { q: u.q, r: u.r };
+    g.userData.unitId = u.id;
     if (bobAmp > 0) this.animated.push({ obj: g, base: y, phase: u.id, amp: bobAmp });
     return g;
   }
@@ -1162,6 +1173,37 @@ export class SceneView {
     if (opts.move) mk(opts.move, 0xffd23f, 0.33);
     if (opts.attack) mk(opts.attack, 0xff4030, 0.45);
     if (opts.build) mk(opts.build, 0x6fff7a, 0.3);
+  }
+
+  setHover(pos: { q: number; r: number } | null) {
+    if (!pos) {
+      this.hoverMesh.visible = false;
+      return;
+    }
+    const { x, z } = toWorld(pos);
+    this.hoverMesh.position.set(x, this.groundY(pos.q, pos.r) + 0.045, z);
+    this.hoverMesh.visible = true;
+  }
+
+  /** Slide-hop a unit's mesh from its previous tile to where it now stands. */
+  animateUnitMove(unitId: number, fromQ: number, fromR: number) {
+    const obj = this.dynamicGroup.children.find((c) => c.userData.unitId === unitId);
+    if (!obj) return;
+    const { x, z } = toWorld({ q: fromQ, r: fromR });
+    const from = new THREE.Vector3(x, this.groundY(fromQ, fromR), z);
+    this.tweens.push({ obj, from, to: obj.position.clone(), start: performance.now(), dur: 260 });
+  }
+
+  /** A brief flash where damage lands. */
+  spawnBurst(q: number, r: number) {
+    const m = new THREE.Mesh(
+      new THREE.SphereGeometry(0.16, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.9, depthWrite: false }),
+    );
+    const { x, z } = toWorld({ q, r });
+    m.position.set(x, this.groundY(q, r) + 0.45, z);
+    this.scene.add(m);
+    this.bursts.push({ obj: m, start: performance.now() });
   }
 
   setSelection(pos: { q: number; r: number } | null) {
@@ -1225,6 +1267,27 @@ export class SceneView {
     this.selectionRing.rotation.y = t * 1.5;
     const s = 1 + 0.06 * Math.sin(t * 4);
     this.selectionRing.scale.set(s, 1, s);
+
+    // Movement tweens run after the bob loop so they win while active.
+    const now = performance.now();
+    this.tweens = this.tweens.filter((tw) => {
+      const e = Math.min(1, (now - tw.start) / tw.dur);
+      const ease = 1 - (1 - e) * (1 - e);
+      tw.obj.position.lerpVectors(tw.from, tw.to, ease);
+      tw.obj.position.y += Math.sin(ease * Math.PI) * 0.22; // little hop
+      return e < 1;
+    });
+    this.bursts = this.bursts.filter((b) => {
+      const e = (now - b.start) / 320;
+      if (e >= 1) {
+        this.scene.remove(b.obj);
+        return false;
+      }
+      b.obj.scale.setScalar(1 + e * 1.8);
+      (b.obj.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - e);
+      return true;
+    });
+
     this.renderer.render(this.scene, this.camera);
   }
 }

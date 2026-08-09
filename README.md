@@ -55,7 +55,7 @@ emblems, all-watching orbs, and haloed obelisks.
 
 - **Left-click** — select / move / attack
 - **Right-drag or WASD/arrows** — pan camera, **wheel** — zoom
-- **Enter** — end turn, **Esc** — cancel / deselect
+- **Enter** — end turn, **Esc** — cancel / deselect, **M** — mute audio
 - Select your **Citadel** to construct buildings and produce units
 
 ## Stack

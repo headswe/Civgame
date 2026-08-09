@@ -41,6 +41,32 @@ html, body, #app { width: 100%; height: 100%; overflow: hidden; background: #1a1
 #topbar .spacer { flex: 1; }
 #topbar .turn { color: var(--dim); }
 
+#topbar .erabar {
+  display: inline-block; width: 90px; height: 8px;
+  background: #241c12; border: 1px solid var(--panel-border); border-radius: 4px;
+  overflow: hidden; vertical-align: middle;
+}
+#topbar .erabar i {
+  display: block; height: 100%;
+  background: linear-gradient(to right, #3a7bd9, var(--compute));
+  transition: width 0.4s;
+}
+
+/* ---------- damage popups ---------- */
+.dmg-pop {
+  position: absolute; z-index: 25; pointer-events: none;
+  transform: translateX(-50%);
+  color: #ff8a6b; font-weight: bold; font-size: 15px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  animation: dmg-float 0.95s ease-out forwards;
+}
+.dmg-pop.kill { color: var(--power); font-size: 17px; }
+@keyframes dmg-float {
+  0% { opacity: 0; margin-top: 6px; }
+  15% { opacity: 1; }
+  100% { opacity: 0; margin-top: -30px; }
+}
+
 /* ---------- side panel ---------- */
 #sidepanel {
   position: absolute; left: 12px; top: 52px; width: 268px;
