@@ -21,28 +21,32 @@ if (!KEY) {
 }
 
 const STYLE =
-  "Painterly stylized video-game faction leader portrait, head and shoulders, square composition, " +
-  "facing the viewer, dramatic rim lighting, muted desaturated post-apocalyptic palette, ash haze background, " +
-  "concept art illustration, NOT a photograph. The subject is an entirely fictional invented character " +
-  "and must not resemble any real living person.";
+  "Satirical caricature portrait for a video game faction leader, head and shoulders, square composition, " +
+  "facing the viewer. Editorial-cartoon caricature style: painterly brushwork with knowingly exaggerated " +
+  "features — an oversized head, overstated jaw, nose and expression — obviously an illustrated caricature " +
+  "rather than a photograph. Muted desaturated post-apocalyptic palette, ash haze background, dramatic rim lighting.";
 
 const PORTRAITS = {
   dominion:
-    "A swaggering warlord of a rocket cult: scorched red-and-black flight jacket with singed collar, " +
-    "cracked flight visor pushed up on the forehead, soot-streaked stubbled face, arrogant crooked smirk, " +
-    "red accent lighting, faint gantry silhouettes in the haze behind.",
+    "A smug rocket-obsessed tech baron in his early fifties: broad puffy face, heavy jaw, thinning dark hair " +
+    "swept back from a high forehead, faint stubble, a tight self-satisfied smirk with the chin tipped up. " +
+    "Wearing a scorched black bomber jacket over a black shirt, a red rocket emblem on the chest, " +
+    "flight goggles shoved up on his head. Red accent lighting, launch-gantry silhouettes in the haze behind.",
   collective:
-    "An impassive hive-overlord: seamless chrome visor band covering the eyes, unnaturally smooth pale skin, " +
-    "high-collared slate-grey uniform with thin glowing blue circuit trim, utterly blank expression, " +
-    "cold blue rim lighting, faint grid pattern in the haze behind.",
+    "An eerily blank young tech overlord: very pale smooth skin, wide unblinking eyes, a blunt straight fringe " +
+    "of light-brown hair cut flat across the forehead, rigid neutral expression like a mask of politeness. " +
+    "Wearing a plain grey crew-neck shirt under a high-collared slate uniform with thin glowing blue circuit trim. " +
+    "Cold blue rim lighting, a faint grid pattern in the haze behind.",
   caliphate:
-    "A logistics tyrant: bald, broad-shouldered, amber-trimmed quilted work tunic with cargo webbing and a " +
-    "heavy ring of warehouse keys, arms folded, smug confident grin, warm amber lighting, " +
+    "A gleeful bald logistics tycoon in his late fifties: shaved head, thick neck, powerful gym-built shoulders, " +
+    "a huge open toothy grin with deep laugh lines and crinkled eyes. Wearing an amber-trimmed quilted work gilet " +
+    "over a rugged shirt, with a heavy chain of warehouse keys. Warm amber lighting, " +
     "stacked shipping-container silhouettes in the haze behind.",
   papacy:
-    "A slender ascetic prophet: pale ivory and teal vestments, hands clasped, serene and faintly unsettling smile, " +
-    "a thin glowing hexagonal halo of light hovering behind the head, soft teal glow, " +
-    "cathedral-like server monoliths in the haze behind.",
+    "A boyish AI prophet in his late thirties: slim build, softly rounded youthful face, tousled light-brown hair, " +
+    "a serene knowing half-smile that does not reach the eyes, hands clasped as if in benediction. " +
+    "Wearing pale ivory and teal techwear vestments over a plain shirt, a thin glowing hexagonal halo of light " +
+    "hovering behind his head. Soft teal glow, cathedral-like server monoliths in the haze behind.",
 };
 
 const wanted = process.argv.slice(2);
