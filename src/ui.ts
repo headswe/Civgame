@@ -105,7 +105,10 @@ export class GameUI {
     }
 
     // Otherwise select what's on the tile: unit first, then building, then dirt.
-    if (tile.unit) this.select({ type: "unit", unit: tile.unit });
+    // Clicking the same tile again cycles unit -> building underneath it.
+    if (tile.unit && this.selection?.type === "unit" && this.selection.unit === tile.unit && tile.building) {
+      this.select({ type: "building", building: tile.building });
+    } else if (tile.unit) this.select({ type: "unit", unit: tile.unit });
     else if (tile.building) this.select({ type: "building", building: tile.building });
     else this.select({ type: "tile", tile });
   }

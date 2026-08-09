@@ -52,7 +52,14 @@ export class Game {
 
     starts.forEach((s, i) => {
       this.placeBuilding("citadel", i, s.q, s.r, true);
-      this.spawnUnit("drone", i, s.q, s.r);
+      // First drone starts beside the citadel so the citadel stays clickable.
+      for (const n of neighbors(s)) {
+        const t = this.tile(n.q, n.r);
+        if (t && !t.unit && t.terrain !== Terrain.Slag) {
+          this.spawnUnit("drone", i, n.q, n.r);
+          break;
+        }
+      }
     });
   }
 
@@ -214,8 +221,9 @@ export class Game {
     const def = UNITS[kind];
     const opts = this.availableUnits(faction, site);
     if (!opts.find((o) => o.def.kind === kind)?.ok) return null;
-    // Spawn on the site tile if free, otherwise on a free adjacent tile.
-    const spots = [{ q: site.q, r: site.r }, ...neighbors(site)];
+    // Prefer adjacent free tiles so the production site stays clickable;
+    // fall back to the site tile itself.
+    const spots = [...neighbors(site), { q: site.q, r: site.r }];
     for (const s of spots) {
       const t = this.tile(s.q, s.r);
       if (!t || t.unit || t.terrain === Terrain.Slag) continue;

@@ -486,6 +486,16 @@ export class SceneView {
     return null;
   }
 
+  /** World tile -> screen pixel coords (used by automated playtests + debugging). */
+  toScreen(q: number, r: number): { x: number; y: number } {
+    const { x, z } = toWorld({ q, r });
+    const v = new THREE.Vector3(x, this.groundY(q, r), z).project(this.camera);
+    return {
+      x: ((v.x + 1) / 2) * window.innerWidth,
+      y: ((-v.y + 1) / 2) * window.innerHeight,
+    };
+  }
+
   // -------------------------------------------------------------------- loop
 
   private frame() {

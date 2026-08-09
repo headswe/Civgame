@@ -51,6 +51,10 @@ function startGame(faction: number) {
 
   new GameUI(game, view, () => showGameOver(game));
 
+  // Dev hooks for debugging and automated playtests.
+  (window as unknown as Record<string, unknown>).__game = game;
+  (window as unknown as Record<string, unknown>).__view = view;
+
   game.log(`You are ${FACTIONS[faction].leader} of the ${FACTIONS[faction].name}. The wasteland awaits your disruption.`, "quote");
   game.log(FACTIONS[faction].quotes[1] ?? FACTIONS[faction].quotes[0], "quote");
 }
