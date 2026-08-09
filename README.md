@@ -35,7 +35,12 @@ Then open the printed URL (usually http://localhost:5173).
 - **Fog of war** — the wasteland starts unknown. Units and buildings project
   sight (drones and citadels see furthest); explored ground stays on the map as
   dim memory, but enemy units only exist where you can currently see.
-- Scavenge pre-Collapse **ruins** with drones for +15⚡ lump sums.
+- Send drones into pre-Collapse **ruins** — city blocks, dead suburbs, bunkers
+  and trench lines. Each triggers a **random event with choices**: 20 of them,
+  five per ruin type, paying out in salvage, water, recruits, or a badly
+  damaged drone depending on how ruthless you're willing to be. Towns have
+  water and the people guarding it; bunkers and trenches have hardware that
+  may or may not still be loyal to somebody else.
 - **Geothermal vents are contested ground**: a vent can host a Fusion Reactor
   (+5⚡) *or* a Water Condenser (+4💧) — never both. Power or coolant, choose.
 - **Turrets** auto-fire at adjacent enemies. **Slag flows** are impassable.

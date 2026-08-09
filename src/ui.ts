@@ -1,6 +1,7 @@
 import { Terrain, type Building, type BuildingKind, type Tile, type Unit } from "./types";
 import { BUILDINGS, FACTIONS, TIERS, UNITS } from "./content";
 import { GEOVENT_WATER_BONUS } from "./game";
+import { RUIN_EVENT_LABEL } from "./events";
 import { key } from "./hex";
 import type { Game, LogKind } from "./game";
 import { runAiTurn } from "./ai";
@@ -270,14 +271,12 @@ export class GameUI {
         <div class="row">Moves left: ${u.movesLeft}${u.attacked ? " · has attacked" : ""}</div>
         <hr><div class="hint">${d.desc}</div>`;
       if (own && this.game.canScavenge(u)) {
+        const kind = this.game.tile(u.q, u.r)?.ruinKind ?? "city";
         const btn = document.createElement("button");
         btn.className = "btn";
-        btn.innerHTML = `SCAVENGE RUINS <span class="cost">+15⚡</span><span class="desc">Strip the old world for parts. Ends this drone's turn.</span>`;
-        btn.onclick = () => {
-          this.game.scavenge(u);
-          sfx.play("scavenge");
-          this.refresh();
-        };
+        btn.innerHTML = `ENTER THE RUINS <span class="cost">?</span>
+          <span class="desc">${RUIN_EVENT_LABEL[kind]} — what you find depends on what you're willing to do. Ends this drone's turn.</span>`;
+        btn.onclick = () => this.openScavengeEvent(u);
         el.appendChild(btn);
       }
       return;
@@ -371,6 +370,61 @@ export class GameUI {
           ? this.selection.tile
           : null,
     );
+  }
+
+  /** The scavenging event dialog: a scene, a dilemma, and consequences. */
+  private openScavengeEvent(u: Unit) {
+    const started = this.game.beginScavenge(u);
+    if (!started) return;
+    const { kind, event } = started;
+    sfx.play("scavenge");
+    this.busy = true;
+    this.select(null);
+
+    const overlay = document.getElementById("overlay")!;
+    const render = (body: string) => {
+      overlay.innerHTML = `
+        <div class="menu event-menu">
+          <div class="event-card">
+            <div class="event-art">
+              <img src="events/${kind}.png" alt="" onerror="this.style.display='none'">
+              <div class="event-art-label">${RUIN_EVENT_LABEL[kind]}</div>
+            </div>
+            <div class="event-body">${body}</div>
+          </div>
+        </div>`;
+    };
+
+    render(`
+      <h3>${event.title}</h3>
+      <p>${event.text}</p>
+      <div class="event-choices">
+        ${event.choices.map((c, i) => `<button class="btn event-choice" data-i="${i}">${c.label}</button>`).join("")}
+      </div>`);
+
+    overlay.querySelectorAll<HTMLElement>(".event-choice").forEach((b) => {
+      b.onclick = () => {
+        const outcome = this.game.resolveScavenge(u, event, Number(b.dataset.i));
+        const gains = [
+          outcome.power ? `<b class="g">+${outcome.power}⚡</b>` : "",
+          outcome.water ? `<b class="g">+${outcome.water}💧</b>` : "",
+          outcome.compute ? `<b class="g">+${outcome.compute}▣</b>` : "",
+          outcome.unit ? `<b class="g">+1 ${UNITS[outcome.unit].name}</b>` : "",
+          outcome.damage ? `<b class="b">−${outcome.damage} HP</b>` : "",
+        ].filter(Boolean).join(" · ");
+        sfx.play(outcome.damage ? "hit" : "build");
+        render(`
+          <h3>${event.title}</h3>
+          <p class="result">${outcome.log}</p>
+          <div class="event-gains">${gains || '<span class="dim">Nothing of value was found.</span>'}</div>
+          <div class="event-choices"><button class="btn event-choice" id="ev-done">CONTINUE</button></div>`);
+        document.getElementById("ev-done")!.onclick = () => {
+          overlay.innerHTML = "";
+          this.busy = false;
+          this.refresh();
+        };
+      };
+    });
   }
 
   private damagePopup(q: number, r: number, dmg: number, kill: boolean) {

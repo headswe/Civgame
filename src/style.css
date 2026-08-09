@@ -261,6 +261,36 @@ html, body, #app { width: 100%; height: 100%; overflow: hidden; background: #1a1
 }
 .briefing .keys b { color: var(--text); }
 
+/* scavenging event dialog */
+.event-menu { width: min(48rem, 94vw); }
+.event-card {
+  background: var(--panel); border: 1px solid var(--panel-border);
+  border-radius: 0.4rem; overflow: hidden;
+  box-shadow: 0 1.2rem 3rem rgba(0, 0, 0, 0.6);
+}
+.event-art { position: relative; aspect-ratio: 16 / 7; overflow: hidden; background: #241c14; }
+.event-art img { width: 100%; height: 100%; object-fit: cover; display: block; filter: saturate(0.85); }
+.event-art::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(to bottom, rgba(10, 7, 4, 0.15) 40%, rgba(16, 14, 12, 0.95));
+}
+.event-art-label {
+  position: absolute; left: 0.9rem; bottom: 0.5rem; z-index: 1;
+  font-size: 0.68rem; letter-spacing: 0.16em; color: var(--dim); text-transform: uppercase;
+}
+.event-body { padding: 1rem 1.2rem 1.2rem; }
+.event-body h3 {
+  font-size: 1.05rem; letter-spacing: 0.1em; color: var(--power); margin-bottom: 0.6rem;
+}
+.event-body p { font-size: 0.8rem; line-height: 1.7; color: var(--text); }
+.event-body p.result { color: #d8ccb4; font-style: italic; }
+.event-choices { margin-top: 0.9rem; display: flex; flex-direction: column; gap: 0.15rem; }
+.btn.event-choice { font-size: 0.82rem; padding: 0.6rem 0.8rem; text-align: left; }
+.event-gains { margin-top: 0.7rem; font-size: 0.85rem; }
+.event-gains b.g { color: var(--ok); }
+.event-gains b.b { color: var(--danger); }
+.event-gains .dim { color: var(--dim); font-style: italic; font-size: 0.78rem; }
+
 .menu .endstate { text-align: center; font-size: 0.95rem; line-height: 1.8; margin: 0.8rem 0; }
 .menu .howto { color: var(--dim); font-size: 0.75rem; line-height: 1.7; }
 .menu .howto b { color: var(--text); }

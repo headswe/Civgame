@@ -4,12 +4,14 @@ import {
   type BuildingDef,
   type BuildingKind,
   type FactionState,
+  type RuinKind,
   type Tile,
   type Unit,
   type UnitDef,
   type UnitKind,
 } from "./types";
 import { BUILDINGS, FACTIONS, TIERS, SINGULARITY_TIER, UNITS, ADVISOR, pick } from "./content";
+import { SCAVENGE_EVENTS, type ScavengeEvent, type ScavengeOutcome } from "./events";
 import { distance, key, neighbors } from "./hex";
 import { generateMap } from "./mapgen";
 
@@ -18,7 +20,6 @@ export type LogFn = (msg: string, kind?: LogKind) => void;
 
 export const GEOVENT_BONUS = 5;
 export const GEOVENT_WATER_BONUS = 4;
-export const RUIN_LOOT = 15;
 export const BUILD_RANGE = 2;
 export const SIGHT_RANGE = 2;
 export const SIGHT_RANGE_FAR = 3; // drones aloft and citadel watchtowers
@@ -431,14 +432,57 @@ export class Game {
     return !!t && t.terrain === Terrain.Ruins && !t.looted;
   }
 
-  scavenge(u: Unit): boolean {
-    if (!this.canScavenge(u)) return false;
+  /**
+   * Enter a ruin: burns the drone's turn, marks the site looted, and returns
+   * the event to resolve. The caller (player UI or AI) picks a choice and
+   * passes it to `resolveScavenge`.
+   */
+  beginScavenge(u: Unit): { kind: RuinKind; event: ScavengeEvent } | null {
+    if (!this.canScavenge(u)) return null;
     const t = this.tile(u.q, u.r)!;
     t.looted = true;
     u.movesLeft = 0;
-    this.factions[u.faction].power += RUIN_LOOT;
-    if (this.factions[u.faction].isPlayer) this.log(pick(ADVISOR.scavenge), "quote");
-    return true;
+    const kind = t.ruinKind ?? "city";
+    return { kind, event: pick(SCAVENGE_EVENTS[kind]) };
+  }
+
+  /** Roll one of the choice's weighted outcomes and apply it. */
+  resolveScavenge(u: Unit, event: ScavengeEvent, choiceIndex: number): ScavengeOutcome {
+    const choice = event.choices[choiceIndex] ?? event.choices[0];
+    const total = choice.outcomes.reduce((sum, o) => sum + o.weight, 0);
+    let roll = Math.random() * total;
+    let result = choice.outcomes[choice.outcomes.length - 1].result;
+    for (const o of choice.outcomes) {
+      roll -= o.weight;
+      if (roll <= 0) {
+        result = o.result;
+        break;
+      }
+    }
+
+    const fs = this.factions[u.faction];
+    if (result.power) fs.power += result.power;
+    if (result.water) fs.water += result.water;
+    if (result.compute) fs.compute += result.compute;
+    if (result.unit) {
+      // Recruits fall in beside the scavenger, or on its tile if it dies below.
+      for (const n of [...neighbors(u), { q: u.q, r: u.r }]) {
+        const t = this.tile(n.q, n.r);
+        if (t && !t.unit && t.terrain !== Terrain.Slag && (!t.building || t.building.faction === u.faction)) {
+          this.spawnUnit(result.unit, u.faction, n.q, n.r);
+          break;
+        }
+      }
+    }
+    if (result.damage) {
+      u.hp -= result.damage;
+      if (u.hp <= 0) {
+        this.killUnit(u);
+        this.log(`${this.factions[u.faction].def.name}'s scavenger was destroyed in the ruins.`, "combat");
+      }
+    }
+    if (fs.isPlayer) this.log(result.log, result.damage ? "combat" : "good");
+    return result;
   }
 
   // -------------------------------------------------------------- turn cycle

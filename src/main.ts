@@ -1,5 +1,5 @@
 import { FACTIONS, TIERS } from "./content";
-import { Game, GEOVENT_BONUS, GEOVENT_WATER_BONUS, RUIN_LOOT } from "./game";
+import { Game, GEOVENT_BONUS, GEOVENT_WATER_BONUS } from "./game";
 import { SceneView } from "./scene";
 import { sfx } from "./sfx";
 import { GameUI } from "./ui";
@@ -91,7 +91,9 @@ function showBriefing(faction: number) {
           </section>
           <section>
             <h3>THE GROUND</h3>
-            <p>Scavenge <b>pre-Collapse ruins</b> with drones for +${RUIN_LOOT}⚡ of stored power.
+            <p>Send drones into <b>pre-Collapse ruins</b> — city blocks, dead suburbs, bunkers and
+            trench lines. Each one puts a dilemma to you and pays out in salvage, water, recruits,
+            or a badly damaged drone, depending on what you're willing to do.
             <b>Geothermal vents</b> are the ground worth fighting over: a vent hosts a Fusion
             Reactor (+${GEOVENT_BONUS}⚡) <i>or</i> a Water Condenser (+${GEOVENT_WATER_BONUS}💧), never both.
             <b>Highlands</b> give +2 defence, <b>slag flows</b> are impassable, and the fog hides

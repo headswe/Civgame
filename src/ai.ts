@@ -88,16 +88,24 @@ function aiMoveUnits(game: Game, f: number) {
   }
 }
 
+/** The techno-kings send drones into ruins too; they just pick blind. */
+function aiScavenge(game: Game, u: Unit) {
+  const started = game.beginScavenge(u);
+  if (!started) return;
+  const choice = Math.floor(Math.random() * started.event.choices.length);
+  game.resolveScavenge(u, started.event, choice);
+}
+
 function aiDrone(game: Game, u: Unit) {
   if (game.canScavenge(u)) {
-    game.scavenge(u);
+    aiScavenge(game, u);
     return;
   }
   const ruins = [...game.tiles.values()].filter((t) => t.terrain === Terrain.Ruins && !t.looted);
   if (!ruins.length) return;
   ruins.sort((a, b) => distance(a, u) - distance(b, u));
   stepToward(game, u, ruins[0]);
-  if (game.canScavenge(u)) game.scavenge(u);
+  if (game.canScavenge(u)) aiScavenge(game, u);
 }
 
 function aiWarUnit(game: Game, u: Unit) {
