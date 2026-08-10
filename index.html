@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Enhörningsängen</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🦄</text></svg>">
+</head>
+<body>
+
+<canvas id="spel"></canvas>
+
+<!-- Poängräknare -->
+<div id="hud">
+  <div class="ruta"><span class="ikon">✨</span><span id="glitter">0</span></div>
+  <div class="ruta"><span class="ikon">🦄</span><span id="kompisar">0</span></div>
+  <div class="ruta namnruta"><span id="namn">Enhörning</span></div>
+  <button id="ljud" class="ruta knapp" title="Ljud på och av">🔊</button>
+</div>
+
+<!-- Pekstyrning för surfplatta -->
+<div id="pekstyrning">
+  <div class="grupp vanster">
+    <button class="pil" data-knapp="left" aria-label="Vänster">◀</button>
+    <button class="pil" data-knapp="right" aria-label="Höger">▶</button>
+  </div>
+  <div class="grupp hoger">
+    <button class="pil" data-knapp="up" aria-label="Upp">▲</button>
+    <button class="pil" data-knapp="down" aria-label="Ner">▼</button>
+  </div>
+</div>
+
+<!-- Startskärm -->
+<div id="start">
+  <div class="kort">
+    <h1>Enhörningsängen</h1>
+    <canvas id="forhandsvisning" width="260" height="200"></canvas>
+    <p class="namnrad">Du är <strong id="start-namn">Enhörning</strong></p>
+    <div class="knappar">
+      <button id="slumpa" class="stor mjuk">🎲 Ny enhörning</button>
+      <button id="spela" class="stor">▶ Spela</button>
+    </div>
+    <ul class="hjalp">
+      <li><b>◀ ▶</b> gå åt vänster och höger</li>
+      <li><b>▲</b> flyg upp &nbsp; <b>▼</b> dyk ner</li>
+      <li>Samla <b>✨ glitter</b>, <b>💗 hjärtan</b> och <b>🎈 ballonger</b></li>
+      <li>Gå fram till andra enhörningar så följer de med dig!</li>
+    </ul>
+    <p class="liten">Ängen tar aldrig slut och man kan inte förlora. 💜</p>
+  </div>
+</div>
+
+<script src="js/rng.js"></script>
+<script src="js/unicorn.js"></script>
+<script src="js/world.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
