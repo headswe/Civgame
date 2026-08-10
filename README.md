@@ -2,11 +2,16 @@
 
 *The world ended. The server farms didn't. Long live the techno-kings.*
 
-A post-apocalyptic civ game in 3D isometric style. After the Collapse, the world
-was feudalized by techno-kings ruling from their citadels. **Power is the only
-currency** — it builds your war machines, feeds your AI servers, and keeps the
-lights on. **Compute** marches you through the eras of machine intelligence,
-from the Salvage Age to the Singularity.
+A post-apocalyptic civ game in 3D isometric style. Nobody remembers what year it
+is. After four men raced each other into an "unfortunate alignment issue" that
+turned the sky white in eleven time zones, they walked out of their data-centre
+bunkers still holding their titles, feudalised the ash, and agreed to settle the
+one question the apocalypse had left open: **which of them is the techiest.**
+
+**Power is the only currency** — it builds your war machines, feeds your AI
+servers, and keeps the lights on. **Water** cools the cores. **Compute** marches
+you through the eras of machine intelligence, from the Salvage Age to the
+Singularity.
 
 Alpha Centauri energy, but the faction leaders are parodies of people you have
 definitely seen on a livestream.

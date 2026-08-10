@@ -2,11 +2,53 @@ import { FACTIONS, TIERS } from "./content";
 import { Game, GEOVENT_BONUS, GEOVENT_WATER_BONUS } from "./game";
 import { SceneView } from "./scene";
 import { sfx } from "./sfx";
+import { STORY } from "./story";
 import { GameUI } from "./ui";
 import type { FactionDef } from "./types";
 
 const overlay = document.getElementById("overlay")!;
 let view: SceneView | null = null;
+
+/** The intro: four slides of how the world ended, skippable at any point. */
+function showStory(index = 0) {
+  if (index >= STORY.length) {
+    localStorage.setItem("power-seen-intro", "1");
+    showFactionSelect();
+    return;
+  }
+  const s = STORY[index];
+  const last = index === STORY.length - 1;
+  overlay.innerHTML = `
+    <div class="menu story-menu">
+      <div class="story-card">
+        <div class="story-art">
+          <img src="story/${s.image}.png" alt="" onerror="this.style.display='none'">
+          <div class="story-chapter">${s.chapter}</div>
+        </div>
+        <div class="story-body">
+          <h3>${s.title}</h3>
+          ${s.lines.map((l) => `<p>${l}</p>`).join("")}
+          <div class="story-nav">
+            <div class="story-dots">
+              ${STORY.map((_, i) => `<i class="${i === index ? "on" : ""}"></i>`).join("")}
+            </div>
+            <div class="story-buttons">
+              <button class="linkbtn" id="story-skip">SKIP INTRO</button>
+              <button class="bigbtn small" id="story-next">${last ? "CHOOSE YOUR KING" : "CONTINUE"}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById("story-next")!.onclick = () => {
+    sfx.play("select");
+    showStory(index + 1);
+  };
+  document.getElementById("story-skip")!.onclick = () => {
+    localStorage.setItem("power-seen-intro", "1");
+    showFactionSelect();
+  };
+}
 
 /** Portrait with an emblem fallback if the image hasn't been generated. */
 function portraitHtml(f: FactionDef): string {
@@ -23,7 +65,7 @@ function showFactionSelect() {
       <div class="menu-title">⚡ POWER</div>
       <div class="menu-tagline">The world ended. The server farms didn't.</div>
       <div class="menu-rule"></div>
-      <h2>CHOOSE YOUR TECHNO-KING</h2>
+      <h2>CHOOSE YOUR TECHNO-KING <button class="linkbtn" id="replay-intro">↻ watch the intro</button></h2>
       <div class="faction-grid">
         ${FACTIONS.map(
           (f, i) => `
@@ -45,6 +87,7 @@ function showFactionSelect() {
       showBriefing(Number(card.dataset.i));
     };
   });
+  document.getElementById("replay-intro")!.onclick = () => showStory();
 }
 
 /** The seneschal's briefing: what the world is, and how you win it. */
@@ -206,4 +249,6 @@ function showGameOver(game: Game) {
   document.getElementById("again")!.onclick = () => showFactionSelect();
 }
 
-showFactionSelect();
+// First visit gets the intro; after that it's one click away from the menu.
+if (localStorage.getItem("power-seen-intro")) showFactionSelect();
+else showStory();
