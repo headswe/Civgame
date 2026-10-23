@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Game-independent part of the plugin: MCP protocol, HTTP transport, tool definitions and
+    the sort planner. Built on its own only for the unit tests; the plugin project compiles
+    these sources straight into its own DLL against the game's Newtonsoft.Json.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+</Project>
